@@ -8,16 +8,40 @@ const expect = (condition, message) => {
   if (!condition) failures.push(message);
 };
 
-const requiredEnvFiles = ['.env', '.env.local', '.env.example'];
-for (const file of requiredEnvFiles) {
-  expect(fs.existsSync(path.join(root, file)), `${file} tidak ditemukan`);
-  if (!fs.existsSync(path.join(root, file))) continue;
+const isTruthyEnv = (value) =>
+  Boolean(value) && !['0', 'false', 'no', 'off'].includes(String(value).trim().toLowerCase());
+const runtimeGasUrl = String(process.env.VITE_GAS_URL || '').trim();
+const isCiBuild = isTruthyEnv(process.env.CF_PAGES) || isTruthyEnv(process.env.CI);
+const allowsMissingLocalEnvFiles = Boolean(runtimeGasUrl) || isCiBuild;
+
+if (runtimeGasUrl) {
+  expect(
+    runtimeGasUrl.startsWith('https://script.google.com/macros/s/'),
+    'VITE_GAS_URL bukan URL Web App Google Apps Script'
+  );
+}
+
+for (const file of ['.env', '.env.local']) {
+  const exists = fs.existsSync(path.join(root, file));
+  expect(exists || allowsMissingLocalEnvFiles, `${file} tidak ditemukan di luar environment CI/Cloudflare`);
+  if (!exists) continue;
   const contents = read(file);
   const match = contents.match(/^VITE_APPS_SCRIPT_URL=(.+)$/m);
   expect(Boolean(match?.[1]?.trim()), `${file}: VITE_APPS_SCRIPT_URL kosong`);
   expect(
     Boolean(match?.[1]?.trim().startsWith('https://script.google.com/macros/s/')),
     `${file}: VITE_APPS_SCRIPT_URL bukan URL Web App Google Apps Script`
+  );
+}
+
+expect(fs.existsSync(path.join(root, '.env.example')), '.env.example tidak ditemukan');
+if (fs.existsSync(path.join(root, '.env.example'))) {
+  const contents = read('.env.example');
+  const match = contents.match(/^VITE_APPS_SCRIPT_URL=(.+)$/m);
+  expect(Boolean(match?.[1]?.trim()), '.env.example: VITE_APPS_SCRIPT_URL kosong');
+  expect(
+    Boolean(match?.[1]?.trim().startsWith('https://script.google.com/macros/s/')),
+    '.env.example: VITE_APPS_SCRIPT_URL bukan URL Web App Google Apps Script'
   );
 }
 
