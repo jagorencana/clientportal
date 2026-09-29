@@ -1,0 +1,6 @@
+{
+  "name": "Jago Rencana - Client Portal & Wealth OS",
+  "description": "Independent wealth advisory, comprehensive wealth blueprint, 4-bucket master budgeting, goal sinking fund stress test engine, and KPR restructuring calculator.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

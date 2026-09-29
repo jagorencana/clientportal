@@ -1,0 +1,125 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background-color: #FAF8F5;
+    color: #0F172A;
+  }
+
+  input, button, select, textarea {
+    font-family: inherit;
+  }
+}
+
+@media print {
+  /* Sembunyikan elemen navigasi, floating controls, dan tombol interaktif */
+  aside, 
+  nav, 
+  header,
+  footer,
+  button, 
+  .no-print,
+  .sidebar,
+  input[type="range"],
+  .support-widget,
+  .toast-container,
+  .floating-contact {
+    display: none !important;
+  }
+
+  /* Format halaman cetak A4 Portrait */
+  @page {
+    size: A4 portrait;
+    margin: 12mm 10mm 12mm 10mm;
+  }
+
+  html, body, #root, main {
+    background: #FFFFFF !important;
+    color: #0F172A !important;
+    font-size: 10pt !important;
+    line-height: 1.4 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    height: auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-shadow: none !important;
+  }
+
+  /* Header Institusional Laporan */
+  .print-header {
+    display: block !important;
+    border-bottom: 2px solid #0F1A24;
+    padding-bottom: 12px;
+    margin-bottom: 20px;
+  }
+
+  .print-page-break {
+    page-break-before: always;
+  }
+
+  .card, .p-6, .rounded-3xl, .rounded-2xl, .print-card {
+    border: 1px solid #CBD5E1 !important;
+    border-radius: 8px !important;
+    box-shadow: none !important;
+    margin-bottom: 12px !important;
+    page-break-inside: avoid !important;
+    background: #FFFFFF !important;
+  }
+
+  /* Cetak modal rekening koran saja, dalam kanvas A4 portrait yang stabil. */
+  body:has(.statement-modal) * {
+    visibility: hidden !important;
+  }
+
+  body:has(.statement-modal) .statement-print-root,
+  body:has(.statement-modal) .statement-print-root * {
+    visibility: visible !important;
+  }
+
+  body:has(.statement-modal) .statement-modal {
+    position: static !important;
+    display: block !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    background: #FFFFFF !important;
+  }
+
+  body:has(.statement-modal) .statement-print-root {
+    position: absolute !important;
+    inset: 0 auto auto 0 !important;
+    display: block !important;
+    width: 190mm !important;
+    max-width: 190mm !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+}
+
+.statement-print-root,
+.statement-print-root * {
+  font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif !important;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Custom smooth scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #FAF8F5;
+}
+::-webkit-scrollbar-thumb {
+  background: #D5CEBF;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #32A89C;
+}
