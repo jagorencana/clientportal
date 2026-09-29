@@ -55,6 +55,23 @@ export interface LiveCurrencyResponse {
   error?: string;
 }
 
+/**
+ * Bentuk rate map kanonik dari data yang sama dengan Live FX Benchmark.
+ * Nilai watchlist dipakai sebagai otoritas terakhir agar angka pada modal,
+ * kartu, detail, dan mesin valuasi selalu identik.
+ */
+export function buildLiveFxRateMap(
+  response: Pick<LiveCurrencyResponse, 'idrRates' | 'watchlist'>
+): Record<string, number> {
+  const rates: Record<string, number> = { ...(response.idrRates || {}), IDR: 1 };
+  (response.watchlist || []).forEach((item) => {
+    const code = String(item.code || '').trim().toUpperCase();
+    const rate = Number(item.rateToIdr);
+    if (code && Number.isFinite(rate) && rate > 0) rates[code] = rate;
+  });
+  return rates;
+}
+
 // Fallback rates offline jika perangkat tanpa koneksi internet
 export const FALLBACK_RAW_RATES: Record<string, number> = {
   USD: 1,

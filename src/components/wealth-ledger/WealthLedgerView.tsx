@@ -23,8 +23,8 @@ import {
 import {
   CurrencyWatchlistItem,
   FALLBACK_RAW_RATES,
+  buildLiveFxRateMap,
   buildWatchlistItems,
-  computeRateToIdr,
   fetchUniversalCurrencyRates,
   loadCurrencyCacheFromStorage,
 } from '../../services/currencyService';
@@ -84,9 +84,13 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
   const [manualPrices, setManualPrices] = useState<Record<string, number>>(() =>
     loadManualPricesFromStorage()
   );
-  const [marketRates, setMarketRates] = useState<Record<string, number>>(() =>
-    loadMarketRatesFromStorage()
-  );
+  const [marketRates, setMarketRates] = useState<Record<string, number>>(() => {
+    const storedRates = loadMarketRatesFromStorage();
+    const cachedLiveFx = loadCurrencyCacheFromStorage();
+    return cachedLiveFx
+      ? { ...storedRates, ...buildLiveFxRateMap(cachedLiveFx), IDR: 1 }
+      : storedRates;
+  });
 
   // 2. Navigation & View State (Bank Jago Pro Pattern)
   const [mainView, setMainView] = useState<MainViewMode>('POCKETS');
@@ -318,6 +322,18 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
     saveMarketRatesToStorage(newRates);
   }, []);
 
+  // Satu sumber kurs untuk seluruh UI dan kalkulasi. Watchlist adalah data yang
+  // ditampilkan modal Live FX Benchmark, sehingga harus menang atas cache lama.
+  const liveFxRates = useMemo(() => ({
+    ...marketRates,
+    ...Object.fromEntries(
+      watchlist
+        .filter((item) => Number.isFinite(Number(item.rateToIdr)) && Number(item.rateToIdr) > 0)
+        .map((item) => [String(item.code).toUpperCase(), Number(item.rateToIdr)])
+    ),
+    IDR: 1,
+  }), [marketRates, watchlist]);
+
   // Universal Live FX Fetcher Function using Universal Currency Data Service
   const refreshLiveRates = useCallback(async () => {
     setLiveStatus((prev) => ({ ...prev, isLoading: true, error: null }));
@@ -325,37 +341,19 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
     try {
       const res = await fetchUniversalCurrencyRates();
 
-      if (res.success && res.rawRates) {
+      if (res.idrRates && res.watchlist) {
+        const latestFxRates = buildLiveFxRateMap(res);
         setWatchlist(res.watchlist);
-
-        const newRates: Record<string, number> = { ...marketRates, IDR: 1 };
-
-        pockets.forEach((p) => {
-          const code = (p.currencyCode || 'IDR').toUpperCase();
-          if (code === 'IDR') {
-            newRates[code] = 1;
-          } else if (
-            p.instrumentType === 'LOGAM_MULIA' ||
-            p.instrumentType === 'REKSADANA' ||
-            code === 'XAU' ||
-            code === 'CUSTOM'
-          ) {
-            newRates[code] =
-              manualPrices[code] || p.manualMarketPrice || marketRates[code] || 1520000;
-          } else {
-            const liveRate = computeRateToIdr(code, res.rawRates);
-            newRates[code] = liveRate;
-          }
-        });
-
-        updateMarketRates(newRates);
+        updateMarketRates({ ...marketRates, ...latestFxRates, IDR: 1 });
         setLiveStatus({
           isLoading: false,
           lastUpdated: res.lastUpdated,
-          isLive: true,
-          error: null,
+          isLive: res.success,
+          error: res.success ? null : res.error || 'Offline / Menggunakan cache kurs terakhir',
         });
-        showToast('Kurs live 14 valas portofolio berhasil diperbarui.');
+        if (res.success) {
+          showToast('Kurs live 14 valas portofolio berhasil diperbarui.');
+        }
       } else {
         if (res.watchlist) {
           setWatchlist(res.watchlist);
@@ -376,7 +374,7 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
         error: 'Koneksi API gagal',
       }));
     }
-  }, [pockets, manualPrices, marketRates, updateMarketRates, showToast]);
+  }, [marketRates, updateMarketRates, showToast]);
 
   // Initial Auto-Fetch on mount
   useEffect(() => {
@@ -397,7 +395,7 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
           ? Number(pocket.manualMarketRate)
           : code === 'IDR'
           ? 1
-          : marketRates[code] || pocket.manualMarketPrice || 1;
+          : liveFxRates[code] || pocket.manualMarketPrice || 1;
 
       return computeCurrencyPocketSummary(
         code,
@@ -406,7 +404,7 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
         pocket
       );
     });
-  }, [pockets, transactions, marketRates]);
+  }, [pockets, transactions, liveFxRates]);
 
   const globalSummary = useMemo(() => {
     return computeGlobalWealthSummary(currencyPockets);
@@ -639,10 +637,6 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
       const pCode = (pocketToSave.currencyCode || 'IDR').toUpperCase();
       updateManualPrices({
         ...manualPrices,
-        [pCode]: pocketToSave.manualMarketPrice,
-      });
-      updateMarketRates({
-        ...marketRates,
         [pCode]: pocketToSave.manualMarketPrice,
       });
     }
@@ -1022,7 +1016,7 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
         defaultPocketId={txModalDefaults.pocketId}
         defaultCurrency={txModalDefaults.currency}
         defaultType={txModalDefaults.type}
-        currentRates={marketRates}
+        currentRates={liveFxRates}
         pockets={pockets}
         transactions={transactions}
         isScopedToPocket={isScopedPocketTx}
@@ -1033,7 +1027,7 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
         isOpen={isRatesModalOpen}
         onClose={() => setIsRatesModalOpen(false)}
         pockets={pockets}
-        rates={marketRates}
+        rates={liveFxRates}
         pocketSummaries={currencyPockets}
         onSaveRates={(newRates, newManualPrices) => {
           updateMarketRates(newRates);
@@ -1060,7 +1054,7 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
         isOpen={isBackupModalOpen}
         onClose={() => setIsBackupModalOpen(false)}
         transactions={transactions}
-        marketRates={marketRates}
+        marketRates={liveFxRates}
         pockets={pockets}
         onImportSuccess={handleImportSuccess}
         onReloadRemoteData={handleReloadRemoteData}

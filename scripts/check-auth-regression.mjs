@@ -75,6 +75,13 @@ expect(ledgerService.includes('action=get_ledger_data'), 'Kontrak GET ledger hil
 expect(ledgerService.includes("action: 'sync_ledger_pockets'"), 'Kontrak sync_ledger_pockets hilang');
 expect(!ledgerService.includes("'/api/ledger-proxy'"), 'Ledger kembali memakai proxy relatif lama');
 
+const currencyService = read('src/services/currencyService.ts');
+expect(currencyService.includes('export function buildLiveFxRateMap'), 'Mapper rate pusat Live FX hilang');
+expect(
+  currencyService.includes('rates[code] = rate'),
+  'Watchlist Live FX tidak lagi menjadi sumber rate valuasi'
+);
+
 const viteConfig = read('vite.config.ts');
 expect(viteConfig.includes('configurePreviewServer'), 'Middleware proxy preview autentikasi hilang');
 expect(viteConfig.includes('controller.abort(), 45000'), 'Timeout proxy Vite 45 detik hilang');
@@ -134,6 +141,17 @@ expect(
   wealthLedgerView.includes('new Map<string, AssetPocket>()') &&
     wealthLedgerView.includes('pocketId?: string'),
   'Deduplikasi pocketId sebelum state UI hilang'
+);
+expect(
+  wealthLedgerView.includes('const liveFxRates = useMemo') &&
+    wealthLedgerView.includes('liveFxRates[code]'),
+  'Valuasi kantong tidak memakai central Live FX rate map'
+);
+expect(
+  wealthLedgerView.includes('currentRates={liveFxRates}') &&
+    wealthLedgerView.includes('rates={liveFxRates}') &&
+    wealthLedgerView.includes('marketRates={liveFxRates}'),
+  'Consumer Wealth Ledger belum seluruhnya memakai Live FX rate map'
 );
 
 const gasBackend = read('google-apps-script/Code.gs');
