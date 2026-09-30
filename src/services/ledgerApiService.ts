@@ -155,8 +155,12 @@ export const normalizeRemotePocket = (p: any, idx: number = 0): AssetPocket => {
   const manualMarketRate = Number.isFinite(parsedManualRate) && parsedManualRate > 0
     ? parsedManualRate
     : undefined;
-  const parsedMarketValue = Number(p.marketValue ?? p.marketValueIdr);
-  const marketValue = Number.isFinite(parsedMarketValue) && parsedMarketValue >= 0
+  const rawMarketValue = p.marketValue ?? p.marketValueIdr;
+  const parsedMarketValue = rawMarketValue === '' || rawMarketValue === null || rawMarketValue === undefined
+    ? Number.NaN
+    : Number(rawMarketValue);
+  // Nol/kosong dari sel Sheets bukan valuasi manual. Nilai manual baru aktif setelah input positif.
+  const marketValue = Number.isFinite(parsedMarketValue) && parsedMarketValue > 0
     ? parsedMarketValue
     : undefined;
 
@@ -527,7 +531,9 @@ export const syncRemotePockets = async (
       category: String(normalizedPocket.category || '').trim(),
       sortOrder: typeof p.sortOrder === 'number' ? p.sortOrder : idx + 1,
       manualMarketRate: Number(p.manualMarketRate || 0) || '',
-      marketValue: Number.isFinite(Number(p.marketValue)) ? Number(p.marketValue) : undefined,
+      marketValue: Number.isFinite(Number(p.marketValue)) && Number(p.marketValue) > 0
+        ? Number(p.marketValue)
+        : undefined,
       lastPriceUpdatedAt: p.lastPriceUpdatedAt || '',
       updatedAt: p.updatedAt || nowIso,
     };

@@ -87,7 +87,7 @@ export function computeCurrencyPocketSummary(
     pocket.instrumentType === 'ASET_FISIK';
   const manualMarketRate = Number(pocket.manualMarketRate || 0);
   const storedMarketValue = Number(pocket.marketValue);
-  const hasStoredMarketValue = Number.isFinite(storedMarketValue) && storedMarketValue >= 0;
+  const hasStoredMarketValue = Number.isFinite(storedMarketValue) && storedMarketValue > 0;
   const effectiveSpotRate =
     supportsManualValuation && manualMarketRate > 0
       ? manualMarketRate
@@ -97,9 +97,12 @@ export function computeCurrencyPocketSummary(
           ? currentMarketRate
           : averageBuyRate;
   // Total marketValue yang diinput user selalu menang atas kalkulasi cost basis/rate.
+  const calculatedMarketValue = balanceNative * effectiveSpotRate;
   const marketValueIdr = supportsManualValuation && hasStoredMarketValue
     ? storedMarketValue
-    : balanceNative * effectiveSpotRate;
+    : calculatedMarketValue > 0
+      ? calculatedMarketValue
+      : totalCostBasisIdr;
   const unrealizedPnlIdr = marketValueIdr - totalCostBasisIdr;
   const unrealizedPnlPercent =
     totalCostBasisIdr > 0 ? (unrealizedPnlIdr / totalCostBasisIdr) * 100 : 0;
