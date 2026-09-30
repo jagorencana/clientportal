@@ -9,9 +9,11 @@ const FALLBACK_GAS_URL =
   'https://script.google.com/macros/s/AKfycbwnCkUHXODtKuStZvUnbdohnZyLLD9p53o6VNmMrnpWbaNaSd1PHfP3dInyOjybTdmF/exec';
 const GAS_URL = String(import.meta.env.VITE_LEDGER_GAS_URL || FALLBACK_GAS_URL).trim();
 const GAS_REQUEST_TIMEOUT_MS = 45_000;
+const DELETE_POCKET_TIMEOUT_MS = 10_000;
 const GAS_FETCH_MAX_ATTEMPTS = 3;
 const GAS_RETRY_BASE_DELAY_MS = 750;
-const LEDGER_CACHE_PREFIX = 'jr_wealth_ledger_cache_v1';
+const LEDGER_CACHE_PREFIX = 'wl_pockets_cache';
+const LEGACY_LEDGER_CACHE_PREFIX = 'jr_wealth_ledger_cache_v1';
 
 // Tidak boleh ada fallback tenant produksi. Email wajib berasal dari sesi Client Portal aktif.
 export const DEFAULT_USER_EMAIL = '';
@@ -35,34 +37,71 @@ export interface RemoteLedgerPayload {
   source?: 'remote' | 'cache';
   cacheSavedAt?: string;
   cacheFallbackReason?: string;
+  cacheTenantEmail?: string;
   [key: string]: any;
 }
 
-const tenantCacheKey = (email: string): string => {
+const tenantCacheKey = (email: string, prefix = LEDGER_CACHE_PREFIX): string => {
+  if (prefix === LEDGER_CACHE_PREFIX) {
+    // Reversible encoding avoids collision antar-tenant yang mungkin terjadi pada hash 32-bit lama.
+    return `${prefix}_${encodeURIComponent(email.trim().toLowerCase())}`;
+  }
   let hash = 5381;
   for (const char of email) hash = ((hash << 5) + hash) ^ char.charCodeAt(0);
-  return `${LEDGER_CACHE_PREFIX}_${(hash >>> 0).toString(36)}`;
+  return `${prefix}_${(hash >>> 0).toString(36)}`;
 };
 
-const saveLedgerCache = (email: string, data: RemoteLedgerPayload): void => {
+export const saveCachedLedgerData = (emailInput: string, data: RemoteLedgerPayload): void => {
+  const email = resolveUserEmail(emailInput);
+  if (!email) return;
   if (typeof window === 'undefined') return;
   try {
     window.localStorage.setItem(
       tenantCacheKey(email),
-      JSON.stringify({ ...data, source: 'cache', cacheSavedAt: new Date().toISOString() })
+      JSON.stringify({
+        ...data,
+        source: 'cache',
+        cacheTenantEmail: email,
+        cacheSavedAt: new Date().toISOString(),
+      })
     );
   } catch (error) {
     console.warn('Cache lokal Wealth Ledger tidak dapat disimpan:', error);
   }
 };
 
-const loadLedgerCache = (email: string): RemoteLedgerPayload | null => {
+export const loadCachedLedgerData = (userEmail: string): RemoteLedgerPayload | null => {
+  const email = resolveUserEmail(userEmail);
+  if (!email) return null;
   if (typeof window === 'undefined') return null;
   try {
-    const raw = window.localStorage.getItem(tenantCacheKey(email));
+    const currentKey = tenantCacheKey(email);
+    const legacyKey = tenantCacheKey(email, LEGACY_LEDGER_CACHE_PREFIX);
+    const raw = window.localStorage.getItem(currentKey) || window.localStorage.getItem(legacyKey);
     if (!raw) return null;
     const cached = JSON.parse(raw) as RemoteLedgerPayload;
     if (!Array.isArray(cached.pockets) || !Array.isArray(cached.transactions)) return null;
+    if (cached.cacheTenantEmail && cached.cacheTenantEmail !== email) {
+      console.warn('Cache Wealth Ledger ditolak karena tenant tidak cocok.');
+      return null;
+    }
+    if (!cached.cacheTenantEmail) {
+      const embeddedEmails = new Set(
+        cached.pockets
+          .map((pocket) => String(pocket.userEmail || '').trim().toLowerCase())
+          .filter(Boolean)
+      );
+      if (embeddedEmails.size > 0 && !embeddedEmails.has(email)) {
+        console.warn('Cache lama Wealth Ledger ditolak karena tenant tidak cocok.');
+        return null;
+      }
+    }
+    if (!window.localStorage.getItem(currentKey)) {
+      window.localStorage.setItem(
+        currentKey,
+        JSON.stringify({ ...cached, cacheTenantEmail: email, source: 'cache' })
+      );
+    }
     return { ...cached, source: 'cache' };
   } catch (error) {
     console.warn('Cache lokal Wealth Ledger tidak dapat dibaca:', error);
@@ -76,11 +115,38 @@ const wait = (delayMs: number): Promise<void> =>
 export const normalizeRemotePocket = (p: any, idx: number = 0): AssetPocket => {
   const currency = (p.currency || p.currencyCode || 'IDR').toUpperCase().trim();
   const custodian = p.custodian || p.defaultCustodian || 'CIMB Niaga';
-  const name = p.name || `Kantong ${currency}`;
-  const category = p.category || '';
+  const name = String(p.name || `Kantong ${currency}`).trim();
+  const category = String(p.category || '').trim();
+  const categoryKey = category.toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
   const lowerName = name.toLowerCase();
+  const rawInstrumentType = String(p.instrumentType || '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+  const validInstrumentTypes: InstrumentType[] = [
+    'CASH_VALAS', 'LOGAM_MULIA', 'REKSADANA', 'SAHAM_ETF', 'SINKING_FUND', 'ASET_FISIK',
+  ];
+  const explicitInstrumentType = validInstrumentTypes.includes(rawInstrumentType as InstrumentType)
+    ? rawInstrumentType as InstrumentType
+    : undefined;
+  const categoryInstrumentType: InstrumentType | undefined =
+    /logam|emas|gold/.test(categoryKey) ? 'LOGAM_MULIA'
+      : /sinking|dana tujuan|dana cadangan/.test(categoryKey) ? 'SINKING_FUND'
+      : /aset fisik|operasional|kendaraan|properti|property|inventaris/.test(categoryKey) ? 'ASET_FISIK'
+      : /reksa\s*dana|reksadana|mutual fund/.test(categoryKey) ? 'REKSADANA'
+      : /saham|etf|efek|equity/.test(categoryKey) ? 'SAHAM_ETF'
+      : /kas|valas|tabungan|cash|rekening/.test(categoryKey) ? 'CASH_VALAS'
+      : undefined;
+  const nameInstrumentType: InstrumentType | undefined =
+    /emas|logam/.test(lowerName) ? 'LOGAM_MULIA'
+      : /sinking fund|dana tujuan/.test(lowerName) ? 'SINKING_FUND'
+      : /reksa\s*dana|reksadana/.test(lowerName) ? 'REKSADANA'
+      : /saham|etf|stock|portfolio efek/.test(lowerName) ? 'SAHAM_ETF'
+      : /kendaraan|properti|property|inventaris/.test(lowerName) ? 'ASET_FISIK'
+      : undefined;
 
-  let instrumentType: InstrumentType = p.instrumentType || 'CASH_VALAS';
+  // instrumentType yang tersimpan adalah sumber utama. Kategori/nama hanya fallback untuk data lama.
+  let instrumentType: InstrumentType =
+    explicitInstrumentType || categoryInstrumentType ||
+    (/investasi|investment/.test(categoryKey) ? 'SAHAM_ETF' : undefined) || nameInstrumentType ||
+    (currency === 'XAU' ? 'LOGAM_MULIA' : 'CASH_VALAS');
   let symbol = p.symbol || 'Rp';
   let flag = p.flag || '💳';
   let accentColor = p.accentColor || 'teal';
@@ -89,28 +155,32 @@ export const normalizeRemotePocket = (p: any, idx: number = 0): AssetPocket => {
   const manualMarketRate = Number.isFinite(parsedManualRate) && parsedManualRate > 0
     ? parsedManualRate
     : undefined;
+  const parsedMarketValue = Number(p.marketValue ?? p.marketValueIdr);
+  const marketValue = Number.isFinite(parsedMarketValue) && parsedMarketValue >= 0
+    ? parsedMarketValue
+    : undefined;
 
-  if (currency === 'XAU' || category.toLowerCase().includes('logam') || lowerName.includes('emas')) {
+  if (instrumentType === 'LOGAM_MULIA') {
     instrumentType = 'LOGAM_MULIA';
     symbol = 'gr';
     flag = '🪙';
     accentColor = 'amber';
-  } else if (category.toLowerCase().includes('sinking') || instrumentType === 'SINKING_FUND') {
+  } else if (instrumentType === 'SINKING_FUND') {
     instrumentType = 'SINKING_FUND';
     symbol = 'Rp';
     flag = '🎯';
     accentColor = 'teal';
-  } else if (category.toLowerCase().includes('saham & etf') || lowerName.includes('us stock') || instrumentType === 'SAHAM_ETF') {
+  } else if (instrumentType === 'SAHAM_ETF') {
     instrumentType = 'SAHAM_ETF';
     symbol = '$';
     flag = '🇺🇸';
     accentColor = 'cyan';
-  } else if (category.toLowerCase().includes('reksadana') || lowerName.includes('saham idx') || instrumentType === 'REKSADANA') {
+  } else if (instrumentType === 'REKSADANA') {
     instrumentType = 'REKSADANA';
     symbol = currency === 'USD' ? '$' : 'Rp';
     flag = '📈';
     accentColor = 'purple';
-  } else if (category.toLowerCase().includes('fisik') || instrumentType === 'ASET_FISIK') {
+  } else if (instrumentType === 'ASET_FISIK') {
     instrumentType = 'ASET_FISIK';
     symbol = 'Rp';
     flag = '🏢';
@@ -152,10 +222,19 @@ export const normalizeRemotePocket = (p: any, idx: number = 0): AssetPocket => {
     flag,
     defaultCustodian: custodian,
     custodian,
-    category: category || (instrumentType === 'LOGAM_MULIA' ? 'Logam Mulia' : currency === 'IDR' ? 'Kas & Tabungan Rupiah' : 'Kas Valas'),
+    // Kunci kategori agar konsisten dengan instrumentType dan tidak membawa kategori lama yang salah.
+    category: ({
+      LOGAM_MULIA: 'Logam Mulia',
+      SINKING_FUND: 'Sinking Fund',
+      SAHAM_ETF: 'Saham & ETF',
+      REKSADANA: 'Reksa Dana',
+      ASET_FISIK: 'Aset Fisik & Operasional',
+      CASH_VALAS: currency === 'IDR' ? 'Kas & Tabungan Rupiah' : 'Kas Valas',
+    } as Record<InstrumentType, string>)[instrumentType],
     accentColor,
     manualMarketPrice,
     manualMarketRate,
+    marketValue,
     lastPriceUpdatedAt: p.lastPriceUpdatedAt || p.priceUpdatedAt || undefined,
     isDefault: p.isDefault ?? true,
     sortOrder: typeof p.sortOrder === 'number' ? p.sortOrder : idx + 1,
@@ -167,12 +246,13 @@ export const normalizeRemotePocket = (p: any, idx: number = 0): AssetPocket => {
 /** Direct Google Apps Script transport. Tidak memakai path relatif/proxy lokal. */
 async function executeApiRequest(
   urlParams: string,
-  options?: RequestInit
+  options?: RequestInit,
+  timeoutMs: number = GAS_REQUEST_TIMEOUT_MS
 ): Promise<Response> {
   const isPost = options?.method === 'POST';
   const targetUrl = isPost ? GAS_URL : `${GAS_URL}?${urlParams}`;
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), GAS_REQUEST_TIMEOUT_MS);
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(targetUrl, {
     ...options,
@@ -201,7 +281,8 @@ async function parseJsonResponse<T = any>(res: Response): Promise<T> {
 }
 
 export const fetchRemoteLedgerData = async (
-  userEmail: string = currentUserEmail
+  userEmail: string = currentUserEmail,
+  options: { persistCache?: boolean } = {}
 ): Promise<RemoteLedgerPayload | null> => {
   const emailParam = (userEmail || currentUserEmail || '').trim().toLowerCase();
   if (!emailParam) {
@@ -275,7 +356,7 @@ export const fetchRemoteLedgerData = async (
         activePocketIds.has(String(transaction.pocketId || '').trim())
       );
       data.source = 'remote';
-      saveLedgerCache(emailParam, data);
+      if (options.persistCache !== false) saveCachedLedgerData(emailParam, data);
       return data;
     } catch (error: any) {
       lastError = error;
@@ -289,7 +370,7 @@ export const fetchRemoteLedgerData = async (
     }
   }
 
-  const cached = loadLedgerCache(emailParam);
+  const cached = loadCachedLedgerData(emailParam);
   if (cached) {
     return {
       ...cached,
@@ -367,13 +448,28 @@ export const saveRemoteTransaction = async (
     const typeCode = rawType === 'CREDIT' || rawType === 'IN' ? 'IN' : 'OUT';
 
     const cleanPocketId = String(transaction?.pocketId ?? '').trim();
+    const cleanTransactionId = String(transaction?.id || '').trim();
     const cleanDate = transaction?.date || new Date().toISOString().split('T')[0];
     const cleanNote = transaction?.note || transaction?.notes || transaction?.description || '';
+    if (
+      !cleanTransactionId ||
+      !cleanPocketId ||
+      !Number.isFinite(cleanAmount) ||
+      cleanAmount <= 0 ||
+      !Number.isFinite(cleanRate) ||
+      cleanRate <= 0
+    ) {
+      return {
+        success: false,
+        status: 'error',
+        message: 'Payload transaksi tidak lengkap atau nominal/kurs tidak valid.',
+      };
+    }
 
     // Standard sanitized transaction payload
     const sanitizedPayload = {
       ...transaction,
-      id: transaction?.id || `tx-${Date.now()}`,
+      id: cleanTransactionId,
       pocketId: cleanPocketId,
       amount: isNaN(cleanAmount) ? 0 : cleanAmount,
       rate: isNaN(cleanRate) ? 1 : cleanRate,
@@ -417,29 +513,25 @@ export const syncRemotePockets = async (
     const nowIso = new Date().toISOString();
 
     // Map each pocket to format expected by Sheets, termasuk valuasi manual investasi.
-    const formattedPockets = pockets.map((p, idx) => ({
-      id: p.id,
+    const formattedPockets = pockets.map((p, idx) => {
+      const sourceId = String(p?.id || p?.pocketId || '').trim();
+      if (!sourceId) throw new Error(`Kantong pada posisi ${idx + 1} tidak memiliki pocketId.`);
+      const normalizedPocket = normalizeRemotePocket(p, idx);
+      return {
+      id: normalizedPocket.id,
       userEmail: emailToUse,
-      name: p.name,
-      instrumentType: p.instrumentType,
-      currency: (p.currency || p.currencyCode || 'IDR').toUpperCase().trim(),
-      custodian: p.custodian || p.defaultCustodian || 'CIMB Niaga',
-      category: p.category || (p.instrumentType === 'LOGAM_MULIA' || (p.currencyCode || p.currency) === 'XAU'
-        ? 'Logam Mulia'
-        : p.instrumentType === 'SINKING_FUND'
-        ? 'Sinking Fund'
-        : p.instrumentType === 'SAHAM_ETF' || (p.name || '').toLowerCase().includes('stock')
-        ? 'Saham & ETF'
-        : p.instrumentType === 'REKSADANA' || (p.name || '').toLowerCase().includes('saham idx')
-        ? 'Reksadana / Efek'
-        : (p.currencyCode || p.currency) === 'IDR'
-        ? 'Kas & Tabungan Rupiah'
-        : 'Kas Valas'),
+      name: normalizedPocket.name,
+      instrumentType: normalizedPocket.instrumentType,
+      currency: normalizedPocket.currencyCode,
+      custodian: String(normalizedPocket.custodian || normalizedPocket.defaultCustodian || 'CIMB Niaga').trim(),
+      category: String(normalizedPocket.category || '').trim(),
       sortOrder: typeof p.sortOrder === 'number' ? p.sortOrder : idx + 1,
       manualMarketRate: Number(p.manualMarketRate || 0) || '',
+      marketValue: Number.isFinite(Number(p.marketValue)) ? Number(p.marketValue) : undefined,
       lastPriceUpdatedAt: p.lastPriceUpdatedAt || '',
       updatedAt: p.updatedAt || nowIso,
-    }));
+    };
+    });
 
     const res = await executeApiRequest('', {
       method: 'POST',
@@ -461,13 +553,16 @@ export const updateRemotePocketMarketRate = async (
   pocketId: string,
   manualMarketRate: number,
   lastPriceUpdatedAt: string,
-  userEmail: string = currentUserEmail
+  userEmail: string = currentUserEmail,
+  marketValue?: number
 ): Promise<{ success: boolean; message?: string; [key: string]: any } | null> => {
   try {
     const emailToUse = resolveUserEmail(userEmail);
     const normalizedPocketId = String(pocketId || '').trim();
     const rate = Number(manualMarketRate);
+    const totalMarketValue = Number(marketValue);
     if (!emailToUse || !normalizedPocketId || !Number.isFinite(rate) || rate <= 0) return null;
+    if (marketValue !== undefined && (!Number.isFinite(totalMarketValue) || totalMarketValue < 0)) return null;
 
     const res = await executeApiRequest('', {
       method: 'POST',
@@ -477,6 +572,7 @@ export const updateRemotePocketMarketRate = async (
         userEmail: emailToUse,
         pocketId: normalizedPocketId,
         manualMarketRate: rate,
+        marketValue: marketValue === undefined ? undefined : totalMarketValue,
         lastPriceUpdatedAt,
       }),
     });
@@ -548,7 +644,7 @@ export const deleteRemotePocketCascade = async (
         userEmail: emailToUse,
         pocketId: normalizedPocketId,
       }),
-    });
+    }, DELETE_POCKET_TIMEOUT_MS);
 
     const result = await parseJsonResponse<DeletePocketCascadeResult>(res);
     return {
@@ -559,6 +655,13 @@ export const deleteRemotePocketCascade = async (
     };
   } catch (err: any) {
     console.warn('Gagal menghapus kantong secara cascade:', err?.message || err);
-    return null;
+    const isTimeout = err?.name === 'AbortError';
+    return {
+      success: false,
+      status: isTimeout ? 'timeout' : 'error',
+      message: isTimeout
+        ? 'Waktu penghapusan kantong melebihi 10 detik.'
+        : 'Google Sheets gagal memproses penghapusan kantong.',
+    };
   }
 };

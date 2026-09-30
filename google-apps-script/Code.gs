@@ -153,6 +153,10 @@ function readTenantLedgerRows(sheet, userEmail) {
         if (normalizedHeader === 'currency') record.currency = value;
         if (normalizedHeader === 'currencycode') record.currencyCode = value;
         if (normalizedHeader === 'name') record.name = value;
+        if (normalizedHeader === 'instrumenttype') record.instrumentType = String(value || '').trim();
+        if (normalizedHeader === 'category') record.category = String(value || '').trim();
+        if (normalizedHeader === 'custodian' || normalizedHeader === 'defaultcustodian') record.custodian = String(value || '').trim();
+        if (normalizedHeader === 'sortorder') record.sortOrder = value;
         if (normalizedHeader === 'amount') record.amount = value;
         if (normalizedHeader === 'nativeamount') record.nativeAmount = value;
         if (normalizedHeader === 'rate') record.rate = value;
@@ -167,6 +171,7 @@ function readTenantLedgerRows(sheet, userEmail) {
         if (normalizedHeader === 'location') record.location = value;
         if (normalizedHeader === 'poscategory') record.posCategory = value;
         if (normalizedHeader === 'manualmarketrate' || normalizedHeader === 'manualrate') record.manualMarketRate = value;
+        if (normalizedHeader === 'marketvalue' || normalizedHeader === 'marketvalueidr') record.marketValue = value;
         if (normalizedHeader === 'lastpriceupdatedat' || normalizedHeader === 'priceupdatedat') record.lastPriceUpdatedAt = value;
       }
     }
@@ -200,6 +205,14 @@ function doPost(e) {
       return handleRepairLedgerOrphanPockets(postData);
     }
 
+    if (action === 'save_ledger_transaction' || action === 'saveLedgerTransaction') {
+      return handleSaveLedgerTransaction(postData);
+    }
+
+    if (action === 'delete_ledger_transaction' || action === 'deleteLedgerTransaction') {
+      return handleDeleteLedgerTransaction(postData);
+    }
+
     // CASE 1: Portal Login
     if (action === 'portal_login') {
       return handlePortalLogin(postData);
@@ -231,7 +244,12 @@ function doPost(e) {
     }
 
     // CASE 7: Wealth Ledger - update manual market rate / NAB
-    if (action === 'update_ledger_pocket_market_rate') {
+    if (
+      action === 'update_ledger_pocket_market_rate' ||
+      action === 'update_ledger_pocket_market_value' ||
+      action === 'updateLedgerPocketMarketRate' ||
+      action === 'updateLedgerPocketMarketValue'
+    ) {
       return handleUpdateLedgerPocketMarketRate(postData);
     }
 
@@ -323,6 +341,136 @@ function handleRepairLedgerOrphanPockets(payload) {
   }
 }
 
+function ensureLedgerTransactionHeaders(sheet) {
+  const required = [
+    'id', 'userEmail', 'pocketId', 'date', 'currency', 'posCategory',
+    'description', 'location', 'type', 'amount', 'rate', 'totalIdr',
+    'nativeAmount', 'exchangeRate', 'costIdr', 'note', 'notes', 'updatedAt'
+  ];
+  if (sheet.getLastRow() < 1 || sheet.getLastColumn() < 1) {
+    sheet.getRange(1, 1, 1, required.length).setValues([required]);
+    return;
+  }
+  const normalized = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0]
+    .map(normalizeLedgerHeader);
+  required.forEach(function(header) {
+    const key = normalizeLedgerHeader(header);
+    if (normalized.indexOf(key) < 0) {
+      sheet.getRange(1, sheet.getLastColumn() + 1).setValue(header);
+      normalized.push(key);
+    }
+  });
+}
+
+function canonicalTransactionValue(transaction, normalizedHeader, userEmail) {
+  const amount = Number(transaction.amount !== undefined ? transaction.amount : transaction.nativeAmount) || 0;
+  const rate = Number(transaction.rate !== undefined ? transaction.rate : transaction.exchangeRate) || 1;
+  const rawType = String(transaction.type || 'IN').trim().toUpperCase();
+  const type = rawType === 'CREDIT' || rawType === 'IN' ? 'IN' : 'OUT';
+  const signedTotal = Math.abs(Number(transaction.totalIdr !== undefined ? transaction.totalIdr : amount * rate)) * (type === 'IN' ? 1 : -1);
+  const description = sanitizeInput(transaction.description || transaction.note || transaction.notes || 'Mutasi Transaksi');
+  if (normalizedHeader === 'id' || normalizedHeader === 'transactionid') return sanitizeInput(transaction.id || transaction.transactionId || '');
+  if (normalizedHeader === 'useremail' || normalizedHeader === 'email') return userEmail;
+  if (normalizedHeader === 'pocketid') return sanitizeInput(transaction.pocketId || '');
+  if (normalizedHeader === 'date') return sanitizeInput(transaction.date || new Date().toISOString().split('T')[0]);
+  if (normalizedHeader === 'currency' || normalizedHeader === 'currencycode') return sanitizeInput(transaction.currency || transaction.currencyCode || 'IDR').toUpperCase();
+  if (normalizedHeader === 'poscategory') return sanitizeInput(transaction.posCategory || '');
+  if (normalizedHeader === 'description') return description;
+  if (normalizedHeader === 'location') return sanitizeInput(transaction.location || '');
+  if (normalizedHeader === 'type') return type;
+  if (normalizedHeader === 'amount' || normalizedHeader === 'nativeamount') return amount;
+  if (normalizedHeader === 'rate' || normalizedHeader === 'exchangerate') return rate;
+  if (normalizedHeader === 'totalidr' || normalizedHeader === 'costidr') return signedTotal;
+  if (normalizedHeader === 'note' || normalizedHeader === 'notes') return description;
+  if (normalizedHeader === 'updatedat') return sanitizeInput(transaction.updatedAt || new Date().toISOString());
+  return undefined;
+}
+
+function handleSaveLedgerTransaction(payload) {
+  const userEmail = sanitizeInput(payload.userEmail || payload.email || '').toLowerCase();
+  const transaction = payload.transaction || payload.data || {};
+  const transactionId = sanitizeInput(transaction.id || transaction.transactionId || '');
+  const pocketId = sanitizeInput(transaction.pocketId || '');
+  if (!userEmail || !transactionId || !pocketId) {
+    return createJsonResponse({ status: 'error', success: false, message: 'userEmail, transaction.id, dan pocketId wajib diisi.' });
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const ss = getSpreadsheet();
+    const pocketSheet = ss.getSheetByName('LEDGER_POCKETS') || ss.getSheetByName('POCKETS');
+    const pocketExists = readTenantLedgerRows(pocketSheet, userEmail).some(function(pocket) {
+      return String(pocket.id || pocket.pocketId || '').trim() === pocketId;
+    });
+    if (!pocketExists) {
+      return createJsonResponse({ status: 'error', success: false, message: 'Kantong transaksi tidak ditemukan untuk tenant aktif.' });
+    }
+
+    let sheet = ss.getSheetByName('LEDGER_TRANSACTIONS');
+    if (!sheet) sheet = ss.insertSheet('LEDGER_TRANSACTIONS');
+    ensureLedgerTransactionHeaders(sheet);
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const normalized = headers.map(normalizeLedgerHeader);
+    const emailIndex = normalized.indexOf('useremail') >= 0 ? normalized.indexOf('useremail') : normalized.indexOf('email');
+    const idIndex = normalized.indexOf('id') >= 0 ? normalized.indexOf('id') : normalized.indexOf('transactionid');
+    const values = sheet.getLastRow() > 1
+      ? sheet.getRange(2, 1, sheet.getLastRow() - 1, headers.length).getValues()
+      : [];
+    let rowNumber = -1;
+    values.forEach(function(row, index) {
+      if (String(row[emailIndex] || '').trim().toLowerCase() === userEmail &&
+          String(row[idIndex] || '').trim() === transactionId) rowNumber = index + 2;
+    });
+    const existing = rowNumber > 0 ? sheet.getRange(rowNumber, 1, 1, headers.length).getValues()[0] : null;
+    const row = headers.map(function(header, index) {
+      const value = canonicalTransactionValue(transaction, normalizeLedgerHeader(header), userEmail);
+      return typeof value === 'undefined' ? (existing ? existing[index] : '') : value;
+    });
+    if (rowNumber > 0) sheet.getRange(rowNumber, 1, 1, headers.length).setValues([row]);
+    else sheet.getRange(sheet.getLastRow() + 1, 1, 1, headers.length).setValues([row]);
+    SpreadsheetApp.flush();
+    return createJsonResponse({ status: 'success', success: true, transactionId: transactionId, operation: rowNumber > 0 ? 'updated' : 'inserted' });
+  } catch (err) {
+    return createJsonResponse({ status: 'error', success: false, message: 'Simpan transaksi gagal: ' + err.toString() });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function handleDeleteLedgerTransaction(payload) {
+  const userEmail = sanitizeInput(payload.userEmail || payload.email || '').toLowerCase();
+  const transactionId = sanitizeInput(payload.transactionId || payload.id || '');
+  if (!userEmail || !transactionId) {
+    return createJsonResponse({ status: 'error', success: false, message: 'userEmail dan transactionId wajib diisi.' });
+  }
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const sheet = getSpreadsheet().getSheetByName('LEDGER_TRANSACTIONS');
+    if (!sheet || sheet.getLastRow() < 2) return createJsonResponse({ status: 'success', success: true, deletedRows: 0 });
+    const values = sheet.getDataRange().getValues();
+    const headers = values[0].map(normalizeLedgerHeader);
+    const emailIndex = headers.indexOf('useremail') >= 0 ? headers.indexOf('useremail') : headers.indexOf('email');
+    const idIndex = headers.indexOf('id') >= 0 ? headers.indexOf('id') : headers.indexOf('transactionid');
+    if (emailIndex < 0 || idIndex < 0) throw new Error('Kolom userEmail dan id transaksi tidak ditemukan.');
+    let deletedRows = 0;
+    for (let index = values.length - 1; index >= 1; index--) {
+      if (String(values[index][emailIndex] || '').trim().toLowerCase() === userEmail &&
+          String(values[index][idIndex] || '').trim() === transactionId) {
+        sheet.deleteRow(index + 1);
+        deletedRows++;
+      }
+    }
+    SpreadsheetApp.flush();
+    return createJsonResponse({ status: 'success', success: true, deletedRows: deletedRows, transactionId: transactionId });
+  } catch (err) {
+    return createJsonResponse({ status: 'error', success: false, message: 'Hapus transaksi gagal: ' + err.toString() });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function normalizeLedgerHeader(value) {
   return String(value || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
 }
@@ -330,7 +478,7 @@ function normalizeLedgerHeader(value) {
 function ensureLedgerPocketHeaders(sheet) {
   const required = [
     'id', 'userEmail', 'name', 'instrumentType', 'currency', 'custodian',
-    'category', 'sortOrder', 'manualMarketRate', 'lastPriceUpdatedAt', 'updatedAt'
+    'category', 'sortOrder', 'marketValue', 'manualMarketRate', 'lastPriceUpdatedAt', 'updatedAt'
   ];
   if (sheet.getLastRow() < 1 || sheet.getLastColumn() < 1) {
     sheet.getRange(1, 1, 1, required.length).setValues([required]);
@@ -357,15 +505,52 @@ function canonicalPocketValue(pocket, normalizedHeader, userEmail) {
   if (normalizedHeader === 'id' || normalizedHeader === 'pocketid') return sanitizeInput(pocket.id || pocket.pocketId || '');
   if (normalizedHeader === 'useremail' || normalizedHeader === 'email') return userEmail;
   if (normalizedHeader === 'name') return sanitizeInput(pocket.name || 'Kantong Aset');
-  if (normalizedHeader === 'instrumenttype') return sanitizeInput(pocket.instrumentType || 'CASH_VALAS');
+  if (normalizedHeader === 'instrumenttype') return normalizePocketInstrumentType(pocket);
   if (normalizedHeader === 'currency' || normalizedHeader === 'currencycode') return sanitizeInput(pocket.currency || pocket.currencyCode || 'IDR').toUpperCase();
   if (normalizedHeader === 'custodian' || normalizedHeader === 'defaultcustodian') return sanitizeInput(pocket.custodian || pocket.defaultCustodian || '');
-  if (normalizedHeader === 'category') return sanitizeInput(pocket.category || 'Kas Valas');
+  if (normalizedHeader === 'category') return normalizePocketCategory(pocket);
   if (normalizedHeader === 'sortorder') return Number(pocket.sortOrder || 0);
-  if (normalizedHeader === 'manualmarketrate' || normalizedHeader === 'manualrate') return Number(pocket.manualMarketRate || 0) || '';
+  if (normalizedHeader === 'marketvalue' || normalizedHeader === 'marketvalueidr') {
+    if (!Object.prototype.hasOwnProperty.call(pocket, 'marketValue') && !Object.prototype.hasOwnProperty.call(pocket, 'marketValueIdr')) return undefined;
+    const marketValue = Number(pocket.marketValue !== undefined ? pocket.marketValue : pocket.marketValueIdr);
+    return isFinite(marketValue) && marketValue >= 0 ? marketValue : undefined;
+  }
+  if (normalizedHeader === 'manualmarketrate' || normalizedHeader === 'manualrate') {
+    if (!Object.prototype.hasOwnProperty.call(pocket, 'manualMarketRate') && !Object.prototype.hasOwnProperty.call(pocket, 'manualRate')) return undefined;
+    const manualRate = Number(pocket.manualMarketRate !== undefined ? pocket.manualMarketRate : pocket.manualRate);
+    return isFinite(manualRate) && manualRate > 0 ? manualRate : undefined;
+  }
   if (normalizedHeader === 'lastpriceupdatedat' || normalizedHeader === 'priceupdatedat') return sanitizeInput(pocket.lastPriceUpdatedAt || '');
   if (normalizedHeader === 'updatedat') return sanitizeInput(pocket.updatedAt || new Date().toISOString());
   return undefined;
+}
+
+function normalizePocketInstrumentType(pocket) {
+  const category = String(pocket.category || '').trim().toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
+  const rawType = String(pocket.instrumentType || '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+  if (['CASH_VALAS', 'LOGAM_MULIA', 'REKSADANA', 'SAHAM_ETF', 'SINKING_FUND', 'ASET_FISIK'].indexOf(rawType) >= 0) return rawType;
+  if (/logam|emas|gold/.test(category)) return 'LOGAM_MULIA';
+  if (/sinking|dana tujuan|dana cadangan/.test(category)) return 'SINKING_FUND';
+  if (/aset fisik|operasional|kendaraan|properti|property|inventaris/.test(category)) return 'ASET_FISIK';
+  if (/reksa\s*dana|reksadana|mutual fund/.test(category)) return 'REKSADANA';
+  if (/saham|etf|efek|equity/.test(category)) return 'SAHAM_ETF';
+  if (/kas|valas|tabungan|cash|rekening/.test(category)) return 'CASH_VALAS';
+  if (/investasi|investment/.test(category)) return 'SAHAM_ETF';
+  return String(pocket.currency || pocket.currencyCode || '').trim().toUpperCase() === 'XAU'
+    ? 'LOGAM_MULIA'
+    : 'CASH_VALAS';
+}
+
+function normalizePocketCategory(pocket) {
+  const type = normalizePocketInstrumentType(pocket);
+  if (type === 'LOGAM_MULIA') return 'Logam Mulia';
+  if (type === 'SINKING_FUND') return 'Sinking Fund';
+  if (type === 'REKSADANA') return 'Reksa Dana';
+  if (type === 'SAHAM_ETF') return 'Saham & ETF';
+  if (type === 'ASET_FISIK') return 'Aset Fisik & Operasional';
+  return String(pocket.currency || pocket.currencyCode || 'IDR').trim().toUpperCase() === 'IDR'
+    ? 'Kas & Tabungan Rupiah'
+    : 'Kas Valas';
 }
 
 function buildPocketRow(headers, existingRow, pocket, userEmail) {
@@ -517,9 +702,12 @@ function handleUpdateLedgerPocketMarketRate(payload) {
   const userEmail = sanitizeInput(payload.userEmail || payload.email || '').toLowerCase();
   const pocketId = sanitizeInput(payload.pocketId || payload.id || '');
   const manualMarketRate = Number(payload.manualMarketRate);
+  const hasMarketValue = payload.marketValue !== undefined || payload.marketValueIdr !== undefined;
+  const marketValue = Number(payload.marketValue !== undefined ? payload.marketValue : payload.marketValueIdr);
   const lastPriceUpdatedAt = sanitizeInput(payload.lastPriceUpdatedAt || new Date().toISOString());
 
-  if (!userEmail || !pocketId || !isFinite(manualMarketRate) || manualMarketRate <= 0) {
+  if (!userEmail || !pocketId || !isFinite(manualMarketRate) || manualMarketRate <= 0 ||
+      (hasMarketValue && (!isFinite(marketValue) || marketValue < 0))) {
     return createJsonResponse({ status: 'error', success: false, message: 'Data harga pasar tidak valid.' });
   }
 
@@ -548,6 +736,12 @@ function handleUpdateLedgerPocketMarketRate(payload) {
       rateIndex = lastColumn;
       lastColumn += 1;
     }
+    let marketValueIndex = normalized.indexOf('marketvalue');
+    if (marketValueIndex < 0) {
+      sheet.getRange(1, lastColumn + 1).setValue('marketValue');
+      marketValueIndex = lastColumn;
+      lastColumn += 1;
+    }
     let updatedAtIndex = normalized.indexOf('lastpriceupdatedat');
     if (updatedAtIndex < 0) {
       sheet.getRange(1, lastColumn + 1).setValue('lastPriceUpdatedAt');
@@ -562,9 +756,10 @@ function handleUpdateLedgerPocketMarketRate(payload) {
       if (rowEmail === userEmail && rowPocketId === pocketId) {
         const sheetRow = index + 2;
         sheet.getRange(sheetRow, rateIndex + 1).setValue(manualMarketRate);
+        if (hasMarketValue) sheet.getRange(sheetRow, marketValueIndex + 1).setValue(marketValue);
         sheet.getRange(sheetRow, updatedAtIndex + 1).setValue(lastPriceUpdatedAt);
         SpreadsheetApp.flush();
-        return createJsonResponse({ status: 'success', success: true, pocketId: pocketId, manualMarketRate: manualMarketRate, lastPriceUpdatedAt: lastPriceUpdatedAt });
+        return createJsonResponse({ status: 'success', success: true, pocketId: pocketId, manualMarketRate: manualMarketRate, marketValue: hasMarketValue ? marketValue : undefined, lastPriceUpdatedAt: lastPriceUpdatedAt });
       }
     }
 

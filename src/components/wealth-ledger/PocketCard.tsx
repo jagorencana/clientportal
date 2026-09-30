@@ -102,7 +102,9 @@ export const PocketCard: React.FC<PocketCardProps> = ({
   const supportsManualValuation =
     pocket.instrumentType === 'LOGAM_MULIA' ||
     pocket.instrumentType === 'REKSADANA' ||
-    pocket.instrumentType === 'SAHAM_ETF';
+    pocket.instrumentType === 'SAHAM_ETF' ||
+    pocket.instrumentType === 'SINKING_FUND' ||
+    pocket.instrumentType === 'ASET_FISIK';
 
   return (
     <div

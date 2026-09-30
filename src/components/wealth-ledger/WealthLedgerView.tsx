@@ -30,6 +30,8 @@ import {
 } from '../../services/currencyService';
 import {
   fetchRemoteLedgerData,
+  loadCachedLedgerData,
+  saveCachedLedgerData,
   saveRemoteTransaction,
   syncRemotePockets,
   deleteRemoteTransaction,
@@ -60,6 +62,9 @@ import {
 
 export type MainViewMode = 'POCKETS' | 'GLOBAL_LEDGER';
 
+const isLedgerMutationSuccess = (result: any): boolean =>
+  result?.success === true || result?.status === 'success';
+
 export interface WealthLedgerProps {
   currentUserEmail?: string;
   clientName?: string;
@@ -72,14 +77,21 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
   monthlySurplusCapacity: monthlySurplusCapacityProp,
 }) => {
   const effectiveEmail = currentUserEmail?.trim().toLowerCase() || '';
+  const [initialLedgerCache] = useState(() =>
+    effectiveEmail ? loadCachedLedgerData(effectiveEmail) : null
+  );
 
   useEffect(() => {
     setCurrentUserEmail(effectiveEmail);
   }, [effectiveEmail]);
 
-  // Data ledger selalu dimulai kosong dan dihidrasi hanya dari tenant aktif di Google Sheets.
-  const [transactions, setTransactions] = useState<LedgerTransaction[]>([]);
-  const [pockets, setPockets] = useState<AssetPocket[]>([]);
+  // Cache tenant aktif ditampilkan pada render pertama; Sheets direvalidasi di background.
+  const [transactions, setTransactions] = useState<LedgerTransaction[]>(() =>
+    Array.isArray(initialLedgerCache?.transactions) ? initialLedgerCache.transactions : []
+  );
+  const [pockets, setPockets] = useState<AssetPocket[]>(() =>
+    Array.isArray(initialLedgerCache?.pockets) ? initialLedgerCache.pockets : []
+  );
 
   const [manualPrices, setManualPrices] = useState<Record<string, number>>(() =>
     loadManualPricesFromStorage()
@@ -183,11 +195,24 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
 
   const [isSyncingSheets, setIsSyncingSheets] = useState(false);
   const [isDeletingPocket, setIsDeletingPocket] = useState(false);
-  const [isLedgerLoading, setIsLedgerLoading] = useState(true);
+  const [isLedgerLoading, setIsLedgerLoading] = useState(!initialLedgerCache);
   const [ledgerLoadError, setLedgerLoadError] = useState<string | null>(null);
-  const [isUsingLedgerCache, setIsUsingLedgerCache] = useState(false);
-  const [lastSheetsSyncTime, setLastSheetsSyncTime] = useState<string | null>(null);
+  const [isUsingLedgerCache, setIsUsingLedgerCache] = useState(Boolean(initialLedgerCache));
+  const [lastSheetsSyncTime, setLastSheetsSyncTime] = useState<string | null>(() => {
+    if (!initialLedgerCache?.cacheSavedAt) return null;
+    return new Date(initialLedgerCache.cacheSavedAt).toLocaleTimeString('id-ID', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  });
   const ledgerRequestIdRef = useRef(0);
+  const ledgerMutationVersionRef = useRef(0);
+  const pendingLedgerWritesRef = useRef(new Map<string, number>());
+  const ledgerWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const transactionsRef = useRef(transactions);
+  const pocketsRef = useRef(pockets);
+  const activeTenantEmailRef = useRef(effectiveEmail);
+  activeTenantEmailRef.current = effectiveEmail;
 
   // State helpers: setiap pocketId hanya boleh menghasilkan satu kartu UI.
   const updateTransactions = useCallback((newTxs: LedgerTransaction[]) => {
@@ -195,6 +220,7 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
       ...transaction,
       pocketId: String(transaction.pocketId ?? '').trim(),
     }));
+    transactionsRef.current = normalized;
     setTransactions(normalized);
   }, []);
 
@@ -205,10 +231,49 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
       const normalized = { ...pocket, id: String(rawId ?? '').trim() };
       if (normalized.id) uniqueById.set(normalized.id, normalized);
     });
-    setPockets(Array.from(uniqueById.values()));
+    const normalizedPockets = Array.from(uniqueById.values());
+    pocketsRef.current = normalizedPockets;
+    setPockets(normalizedPockets);
   }, []);
 
-  const loadLedgerData = useCallback(async (showSuccessToast = false): Promise<boolean> => {
+  const persistLedgerSnapshot = useCallback((
+    nextPockets: AssetPocket[],
+    nextTransactions: LedgerTransaction[]
+  ) => {
+    const email = effectiveEmail.trim().toLowerCase();
+    if (!email) return;
+    saveCachedLedgerData(email, {
+      pockets: nextPockets,
+      transactions: nextTransactions,
+      monthlySurplusCapacity,
+      lastUpdated: new Date().toISOString(),
+    });
+  }, [effectiveEmail, monthlySurplusCapacity]);
+
+  const enqueueLedgerWrite = useCallback(<T,>(operation: () => Promise<T>): Promise<T> => {
+    const queued = ledgerWriteQueueRef.current.then(operation, operation);
+    ledgerWriteQueueRef.current = queued.then(() => undefined, () => undefined);
+    return queued;
+  }, []);
+
+  const beginLedgerWrite = useCallback((tenantEmail: string) => {
+    const pending = pendingLedgerWritesRef.current.get(tenantEmail) || 0;
+    pendingLedgerWritesRef.current.set(tenantEmail, pending + 1);
+  }, []);
+
+  const finishLedgerWrite = useCallback((tenantEmail: string) => {
+    const remaining = Math.max(0, (pendingLedgerWritesRef.current.get(tenantEmail) || 1) - 1);
+    if (remaining === 0) pendingLedgerWritesRef.current.delete(tenantEmail);
+    else pendingLedgerWritesRef.current.set(tenantEmail, remaining);
+    if (remaining === 0 && activeTenantEmailRef.current === tenantEmail) {
+      persistLedgerSnapshot(pocketsRef.current, transactionsRef.current);
+    }
+  }, [persistLedgerSnapshot]);
+
+  const loadLedgerData = useCallback(async (
+    showSuccessToast = false,
+    silentRevalidation = false
+  ): Promise<boolean> => {
     const email = effectiveEmail.trim().toLowerCase();
     if (!email) {
       setIsLedgerLoading(false);
@@ -217,12 +282,20 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
     }
 
     const requestId = ++ledgerRequestIdRef.current;
-    setIsLedgerLoading(true);
+    const mutationVersionAtStart = ledgerMutationVersionRef.current;
+    if (!silentRevalidation) setIsLedgerLoading(true);
     setLedgerLoadError(null);
 
     try {
-      const data = await fetchRemoteLedgerData(email);
+      const data = await fetchRemoteLedgerData(email, { persistCache: false });
       if (requestId !== ledgerRequestIdRef.current) return false;
+      if (
+        mutationVersionAtStart !== ledgerMutationVersionRef.current ||
+        (pendingLedgerWritesRef.current.get(email) || 0) > 0
+      ) {
+        // Snapshot remote dimulai sebelum write lokal selesai; jangan timpa state/cache terbaru.
+        return false;
+      }
       if (!data) {
         throw new Error('Google Sheets belum dapat dijangkau dan cache lokal belum tersedia.');
       }
@@ -245,6 +318,13 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
       }
       updatePockets(remotePockets);
       updateTransactions(remoteTransactions);
+      if (!usingCache) {
+        saveCachedLedgerData(email, {
+          ...data,
+          pockets: remotePockets,
+          transactions: remoteTransactions,
+        });
+      }
       if (!usingCache) {
         // Maintenance berjalan setelah snapshot utama tersedia agar tidak memperlambat initial load.
         void repairRemoteOrphanPockets(email);
@@ -288,13 +368,13 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
     }
     setIsSyncingSheets(true);
     try {
-      await loadLedgerData(true);
+      await loadLedgerData(true, true);
     } finally {
       setIsSyncingSheets(false);
     }
   }, [effectiveEmail, loadLedgerData, showToast]);
 
-  // Initial mount / tenant switch: fetch read-only dari Google Sheets.
+  // Stale-while-revalidate: tampilkan cache tenant seketika, lalu fetch Sheets diam-diam.
   useEffect(() => {
     if (!effectiveEmail) {
       setIsLedgerLoading(false);
@@ -302,15 +382,40 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
       return;
     }
 
-    setTransactions([]);
-    setPockets([]);
+    const cached = loadCachedLedgerData(effectiveEmail);
+    const cachedPockets = Array.isArray(cached?.pockets) ? cached.pockets : [];
+    const cachedPocketIds = new Set(
+      cachedPockets.map((pocket) => String(pocket.id || '').trim()).filter(Boolean)
+    );
+    const cachedTransactions = Array.isArray(cached?.transactions)
+      ? filterValidTransactions(cached.transactions).filter((transaction) =>
+          cachedPocketIds.has(String(transaction.pocketId || '').trim())
+        )
+      : [];
+
+    updatePockets(cachedPockets);
+    updateTransactions(cachedTransactions);
     setActivePocketId(null);
-    void loadLedgerData(false);
+    setIsUsingLedgerCache(Boolean(cached));
+    setLedgerLoadError(null);
+    setIsLedgerLoading(!cached);
+    if (cached?.cacheSavedAt) {
+      setLastSheetsSyncTime(
+        new Date(cached.cacheSavedAt).toLocaleTimeString('id-ID', {
+          hour: '2-digit',
+          minute: '2-digit',
+        })
+      );
+    } else {
+      setLastSheetsSyncTime(null);
+    }
+
+    void loadLedgerData(false, Boolean(cached));
 
     return () => {
       ledgerRequestIdRef.current += 1;
     };
-  }, [effectiveEmail, loadLedgerData]);
+  }, [effectiveEmail, loadLedgerData, updatePockets, updateTransactions]);
 
   const updateManualPrices = useCallback((newPrices: Record<string, number>) => {
     setManualPrices(newPrices);
@@ -389,7 +494,9 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
       const supportsManualValuation =
         pocket.instrumentType === 'LOGAM_MULIA' ||
         pocket.instrumentType === 'REKSADANA' ||
-        pocket.instrumentType === 'SAHAM_ETF';
+        pocket.instrumentType === 'SAHAM_ETF' ||
+        pocket.instrumentType === 'SINKING_FUND' ||
+        pocket.instrumentType === 'ASET_FISIK';
       const currentRate =
         supportsManualValuation && Number(pocket.manualMarketRate) > 0
           ? Number(pocket.manualMarketRate)
@@ -532,7 +639,7 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
     setIsTxModalOpen(true);
   };
 
-  const handleSaveTransaction = (tx: LedgerTransaction) => {
+  const handleSaveTransaction = async (tx: LedgerTransaction) => {
     if (tx.type === 'DEBET') {
       const currentBalance = transactions
         .filter(
@@ -560,77 +667,127 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
     if (existingIndex >= 0) {
       updated = [...transactions];
       updated[existingIndex] = tx;
-      showToast(`Transaksi "${tx.description}" berhasil diperbarui.`);
     } else {
       updated = [tx, ...transactions];
-      showToast(`Transaksi "${tx.description}" berhasil dicatat ke buku besar.`);
     }
 
+    const previousTransaction = existingIndex >= 0 ? transactions[existingIndex] : undefined;
+    const mutationTenant = effectiveEmail;
+    ledgerMutationVersionRef.current += 1;
+    beginLedgerWrite(mutationTenant);
     updateTransactions(updated);
-    saveRemoteTransaction(tx, effectiveEmail).catch((err) => {
-      console.warn('Sync transaction to Sheets failed:', err);
-    });
+    try {
+      const result = await enqueueLedgerWrite(() => saveRemoteTransaction(tx, mutationTenant));
+      if (activeTenantEmailRef.current !== mutationTenant) return;
+      if (!isLedgerMutationSuccess(result)) {
+        throw new Error(result?.message || 'Google Sheets tidak mengonfirmasi penyimpanan transaksi.');
+      }
+      showToast(
+        existingIndex >= 0
+          ? `Transaksi "${tx.description}" berhasil diperbarui.`
+          : `Transaksi "${tx.description}" berhasil disimpan ke Google Sheets.`
+      );
+    } catch (error: any) {
+      if (activeTenantEmailRef.current !== mutationTenant) return;
+      ledgerMutationVersionRef.current += 1;
+      const withoutFailedWrite = transactionsRef.current.filter((item) => item.id !== tx.id);
+      updateTransactions(previousTransaction ? [previousTransaction, ...withoutFailedWrite] : withoutFailedWrite);
+      showToast(error?.message || 'Transaksi gagal disimpan ke Google Sheets. Perubahan dibatalkan.');
+    } finally {
+      finishLedgerWrite(mutationTenant);
+    }
   };
 
-  const handleDeleteTransaction = (id: string) => {
+  const handleDeleteTransaction = async (id: string) => {
     const tx = transactions.find((t) => t.id === id);
     const updated = transactions.filter((t) => t.id !== id);
+    const mutationTenant = effectiveEmail;
+    ledgerMutationVersionRef.current += 1;
+    beginLedgerWrite(mutationTenant);
     updateTransactions(updated);
-    deleteRemoteTransaction(id, effectiveEmail).catch((err) => {
-      console.warn('Delete transaction from Sheets failed:', err);
-    });
-    showToast(`Baris transaksi "${tx?.description || id}" telah dihapus.`);
+    try {
+      const result = await enqueueLedgerWrite(() => deleteRemoteTransaction(id, mutationTenant));
+      if (activeTenantEmailRef.current !== mutationTenant) return;
+      if (!isLedgerMutationSuccess(result)) {
+        throw new Error(result?.message || 'Google Sheets tidak mengonfirmasi penghapusan transaksi.');
+      }
+      showToast(`Baris transaksi "${tx?.description || id}" telah dihapus.`);
+    } catch (error: any) {
+      if (activeTenantEmailRef.current !== mutationTenant) return;
+      ledgerMutationVersionRef.current += 1;
+      const currentTransactions = transactionsRef.current;
+      updateTransactions(
+        tx && !currentTransactions.some((item) => item.id === tx.id)
+          ? [tx, ...currentTransactions]
+          : currentTransactions
+      );
+      showToast(error?.message || 'Transaksi gagal dihapus dari Google Sheets.');
+    } finally {
+      finishLedgerWrite(mutationTenant);
+    }
   };
 
   const handleUpdatePocketMarketRate = async (
     pocketId: string,
-    manualMarketRate: number
+    manualMarketRate: number,
+    marketValue: number
   ): Promise<boolean> => {
     const normalizedPocketId = String(pocketId || '').trim();
     const rate = Number(manualMarketRate);
-    if (!normalizedPocketId || !Number.isFinite(rate) || rate <= 0 || !effectiveEmail) {
+    const totalMarketValue = Number(marketValue);
+    if (!normalizedPocketId || !Number.isFinite(rate) || rate <= 0 || !Number.isFinite(totalMarketValue) || totalMarketValue < 0 || !effectiveEmail) {
       showToast('Harga pasar dan email klien harus valid.');
       return false;
     }
 
-    const previousPockets = pockets;
+    const previousPocket = pockets.find((pocket) => pocket.id === normalizedPocketId);
+    const mutationTenant = effectiveEmail;
     const lastPriceUpdatedAt = new Date().toISOString();
     const updatedPockets = pockets.map((pocket) =>
       String(pocket.id || '').trim() === normalizedPocketId
-        ? { ...pocket, manualMarketRate: rate, lastPriceUpdatedAt, updatedAt: lastPriceUpdatedAt }
+        ? { ...pocket, manualMarketRate: rate, marketValue: totalMarketValue, lastPriceUpdatedAt, updatedAt: lastPriceUpdatedAt }
         : pocket
     );
 
+    ledgerMutationVersionRef.current += 1;
+    beginLedgerWrite(mutationTenant);
     updatePockets(updatedPockets);
-    const result = await updateRemotePocketMarketRate(
-      normalizedPocketId,
-      rate,
-      lastPriceUpdatedAt,
-      effectiveEmail
-    );
-
-    if (!result || result.success === false || result.status === 'error') {
-      updatePockets(previousPockets);
-      showToast(result?.message || 'Harga pasar gagal disimpan ke Google Sheets.');
+    try {
+      const result = await enqueueLedgerWrite(() => updateRemotePocketMarketRate(
+        normalizedPocketId,
+        rate,
+        lastPriceUpdatedAt,
+        mutationTenant,
+        totalMarketValue
+      ));
+      if (activeTenantEmailRef.current !== mutationTenant) return false;
+      if (!isLedgerMutationSuccess(result)) {
+        throw new Error(result?.message || 'Harga pasar gagal disimpan ke Google Sheets.');
+      }
+      showToast('Harga pasar / NAB berhasil diperbarui.');
+      return true;
+    } catch (error: any) {
+      if (activeTenantEmailRef.current !== mutationTenant) return false;
+      ledgerMutationVersionRef.current += 1;
+      const withoutFailedWrite = pocketsRef.current.filter((pocket) => pocket.id !== normalizedPocketId);
+      updatePockets(previousPocket ? [...withoutFailedWrite, previousPocket] : withoutFailedWrite);
+      showToast(error?.message || 'Harga pasar gagal disimpan ke Google Sheets.');
       return false;
+    } finally {
+      finishLedgerWrite(mutationTenant);
     }
-
-    showToast('Harga pasar / NAB berhasil diperbarui.');
-    return true;
   };
 
   // Pocket Management Handlers
-  const handleSavePocket = (pocketToSave: AssetPocket) => {
+  const handleSavePocket = async (pocketToSave: AssetPocket) => {
     const existingIndex = pockets.findIndex((p) => p.id === pocketToSave.id);
     let updated: AssetPocket[];
 
     if (existingIndex >= 0) {
       updated = [...pockets];
       updated[existingIndex] = pocketToSave;
-      showToast(`Kantong "${pocketToSave.name}" berhasil diperbarui.`);
     } else {
       updated = [...pockets, pocketToSave];
-      showToast(`Kantong baru "${pocketToSave.name}" (${pocketToSave.currencyCode}) berhasil ditambahkan.`);
     }
 
     if (pocketToSave.manualMarketPrice) {
@@ -641,10 +798,31 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
       });
     }
 
+    const previousPocket = existingIndex >= 0 ? pockets[existingIndex] : undefined;
+    const mutationTenant = effectiveEmail;
+    ledgerMutationVersionRef.current += 1;
+    beginLedgerWrite(mutationTenant);
     updatePockets(updated);
-    syncRemotePockets(updated, effectiveEmail).catch((err) => {
-      console.warn('Sync pockets to Sheets failed:', err);
-    });
+    try {
+      const result = await enqueueLedgerWrite(() => syncRemotePockets(updated, mutationTenant));
+      if (activeTenantEmailRef.current !== mutationTenant) return;
+      if (!isLedgerMutationSuccess(result)) {
+        throw new Error(result?.message || 'Google Sheets tidak mengonfirmasi penyimpanan kantong.');
+      }
+      showToast(
+        existingIndex >= 0
+          ? `Kantong "${pocketToSave.name}" berhasil diperbarui.`
+          : `Kantong baru "${pocketToSave.name}" berhasil disimpan ke Google Sheets.`
+      );
+    } catch (error: any) {
+      if (activeTenantEmailRef.current !== mutationTenant) return;
+      ledgerMutationVersionRef.current += 1;
+      const withoutFailedWrite = pocketsRef.current.filter((pocket) => pocket.id !== pocketToSave.id);
+      updatePockets(previousPocket ? [...withoutFailedWrite, previousPocket] : withoutFailedWrite);
+      showToast(error?.message || 'Kantong gagal disimpan ke Google Sheets. Perubahan dibatalkan.');
+    } finally {
+      finishLedgerWrite(mutationTenant);
+    }
   };
 
   const handleDeletePocket = async (pocketId: string) => {
@@ -665,7 +843,13 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
       (tx) => String(tx.pocketId || '').trim() !== normalizedPocketId
     );
 
-    // Optimistic state, tetapi akan dimuat ulang dari Sheets bila salah satu operasi remote gagal.
+    const previousActivePocketId = activePocketId;
+    const mutationTenant = effectiveEmail;
+
+    ledgerMutationVersionRef.current += 1;
+    beginLedgerWrite(mutationTenant);
+
+    // Optimistic state agar kartu dan mutasinya langsung hilang dari UI.
     updatePockets(remainingPockets);
     updateTransactions(remainingTransactions);
 
@@ -674,10 +858,14 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
     }
 
     setIsDeletingPocket(true);
+    let remoteDeleteSucceeded = false;
     try {
       // Sync master tidak pernah menghapus baris. Penghapusan hanya melalui
       // endpoint cascade eksplisit agar kantong lain tidak dapat ter-overwrite.
-      const deleteResult = await deleteRemotePocketCascade(normalizedPocketId, effectiveEmail);
+      const deleteResult = await enqueueLedgerWrite(() =>
+        deleteRemotePocketCascade(normalizedPocketId, mutationTenant)
+      );
+      if (activeTenantEmailRef.current !== mutationTenant) return false;
       if (!deleteResult?.success) {
         throw new Error(deleteResult?.message || 'Kantong gagal dihapus dari Google Sheets.');
       }
@@ -685,13 +873,31 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
       showToast(
         `Kantong ${target.name} dan ${relatedTransactions.length} transaksi terkait berhasil dihapus permanen.`
       );
+      remoteDeleteSucceeded = true;
       return true;
-    } catch (error: any) {
-      showToast(`${error?.message || 'Penghapusan remote gagal.'} Memuat ulang data Sheets...`);
-      await loadLedgerData(false);
+    } catch {
+      if (activeTenantEmailRef.current !== mutationTenant) return false;
+      // Rollback segera bila backend gagal/timeout agar data lokal tidak tampak terhapus palsu.
+      const currentPockets = pocketsRef.current;
+      updatePockets(
+        currentPockets.some((pocket) => pocket.id === target.id)
+          ? currentPockets
+          : [...currentPockets, target]
+      );
+      const restoredTransactions = new Map(
+        transactionsRef.current.map((transaction) => [transaction.id, transaction])
+      );
+      relatedTransactions.forEach((transaction) => restoredTransactions.set(transaction.id, transaction));
+      updateTransactions(Array.from(restoredTransactions.values()));
+      setActivePocketId(previousActivePocketId);
+      showToast('Gagal menghapus kantong dari Google Sheets, silakan coba lagi');
       return false;
     } finally {
+      finishLedgerWrite(mutationTenant);
       setIsDeletingPocket(false);
+      if (remoteDeleteSucceeded) {
+        window.setTimeout(() => void loadLedgerData(false, true), 0);
+      }
     }
   };
 
@@ -702,19 +908,57 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
   };
 
   // Import JSON handler
-  const handleImportSuccess = (
+  const handleImportSuccess = async (
     importedTxs: LedgerTransaction[],
     importedRates?: Record<CurrencyType, number>,
     importedPockets?: AssetPocket[]
-  ) => {
-    updateTransactions(importedTxs);
-    if (importedRates) {
-      updateMarketRates({ ...marketRates, ...importedRates });
+  ): Promise<boolean> => {
+    const mutationTenant = effectiveEmail;
+    if (!mutationTenant) {
+      showToast('Impor dibatalkan karena email tenant tidak tersedia.');
+      return false;
     }
-    if (importedPockets && importedPockets.length > 0) {
-      updatePockets(importedPockets);
+    const previousPockets = pocketsRef.current;
+    const previousTransactions = transactionsRef.current;
+    const restoredPockets = importedPockets?.length ? importedPockets : previousPockets;
+    const restoredPocketIds = new Set(restoredPockets.map((pocket) => pocket.id));
+    const restoredTransactions = importedTxs.filter((transaction) =>
+      restoredPocketIds.has(String(transaction.pocketId || '').trim())
+    );
+
+    ledgerMutationVersionRef.current += 1;
+    beginLedgerWrite(mutationTenant);
+    updatePockets(restoredPockets);
+    updateTransactions(restoredTransactions);
+    try {
+      const saved = await enqueueLedgerWrite(async () => {
+        const pocketResult = await syncRemotePockets(restoredPockets, mutationTenant);
+        if (!isLedgerMutationSuccess(pocketResult)) {
+          throw new Error(pocketResult?.message || 'Master kantong gagal dipulihkan.');
+        }
+        for (const transaction of restoredTransactions) {
+          const transactionResult = await saveRemoteTransaction(transaction, mutationTenant);
+          if (!isLedgerMutationSuccess(transactionResult)) {
+            throw new Error(transactionResult?.message || `Transaksi ${transaction.id} gagal dipulihkan.`);
+          }
+        }
+        return true;
+      });
+      if (!saved || activeTenantEmailRef.current !== mutationTenant) return false;
+      if (importedRates) updateMarketRates({ ...marketRates, ...importedRates });
+      showToast(`Berhasil memulihkan ${restoredTransactions.length} transaksi ke Google Sheets.`);
+      return true;
+    } catch (error: any) {
+      if (activeTenantEmailRef.current === mutationTenant) {
+        ledgerMutationVersionRef.current += 1;
+        updatePockets(previousPockets);
+        updateTransactions(previousTransactions);
+        showToast(error?.message || 'Impor ledger gagal disimpan ke Google Sheets.');
+      }
+      return false;
+    } finally {
+      finishLedgerWrite(mutationTenant);
     }
-    showToast(`Berhasil memulihkan ${importedTxs.length} transaksi dari format JSON.`);
   };
 
   // Export CSV Handler

@@ -60,6 +60,8 @@ export const PocketManagerModal: React.FC<PocketManagerModalProps> = ({
   const [editingPocketId, setEditingPocketId] = useState<string | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [pocketToDelete, setPocketToDelete] = useState<{ pocket: AssetPocket; txCount: number } | null>(null);
+  const [isConfirmDeleting, setIsConfirmDeleting] = useState(false);
+  const deleteInProgress = isDeletingPocket || isConfirmDeleting;
 
   // Form states - Defaults to empty string
   const [mainCategory, setMainCategory] = useState<MainCategoryTab>('CASH_VALAS');
@@ -200,10 +202,14 @@ export const PocketManagerModal: React.FC<PocketManagerModalProps> = ({
       name: name.trim(),
       currencyCode: finalCurrencyCode,
       instrumentType: finalInstrumentType,
-      category:
-        finalInstrumentType === 'SINKING_FUND'
-          ? 'Sinking Fund'
-          : existingPocket?.category,
+      category: ({
+        CASH_VALAS: finalCurrencyCode === 'IDR' ? 'Kas & Tabungan Rupiah' : 'Kas Valas',
+        LOGAM_MULIA: 'Logam Mulia',
+        REKSADANA: 'Reksa Dana',
+        SAHAM_ETF: 'Saham & ETF',
+        SINKING_FUND: 'Sinking Fund',
+        ASET_FISIK: 'Aset Fisik & Operasional',
+      } as Record<InstrumentType, string>)[finalInstrumentType],
       symbol: finalSymbol,
       flag: finalFlag,
       defaultCustodian: custodian.trim(),
@@ -211,6 +217,7 @@ export const PocketManagerModal: React.FC<PocketManagerModalProps> = ({
       // Nilai pasar diisi terpisah dari halaman detail sebagai total portofolio.
       manualMarketPrice: undefined,
       manualMarketRate: existingPocket?.manualMarketRate,
+      marketValue: existingPocket?.marketValue,
       lastPriceUpdatedAt: existingPocket?.lastPriceUpdatedAt,
       isDefault: editingPocketId ? pockets.find((p) => p.id === editingPocketId)?.isDefault : false,
     };
@@ -226,10 +233,19 @@ export const PocketManagerModal: React.FC<PocketManagerModalProps> = ({
   };
 
   const handleConfirmDelete = async () => {
-    if (!pocketToDelete) return;
+    if (!pocketToDelete || deleteInProgress) return;
     const pocketId = pocketToDelete.pocket.id;
-    const deleted = await onDeletePocket(pocketId);
-    if (deleted) setPocketToDelete(null);
+    setIsConfirmDeleting(true);
+    try {
+      await onDeletePocket(pocketId);
+    } catch (error) {
+      // Parent menampilkan toast; modal tetap harus dilepas oleh finally.
+      console.warn('Penghapusan kantong gagal:', error);
+    } finally {
+      // Dialog harus selalu dapat ditutup, termasuk ketika request timeout/error.
+      setIsConfirmDeleting(false);
+      setPocketToDelete(null);
+    }
   };
 
   if (!isOpen) return null;
@@ -927,7 +943,7 @@ export const PocketManagerModal: React.FC<PocketManagerModalProps> = ({
               <button
                 type="button"
                 onClick={() => setPocketToDelete(null)}
-                disabled={isDeletingPocket}
+                disabled={deleteInProgress}
                 className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition cursor-pointer"
               >
                 Batal
@@ -935,10 +951,10 @@ export const PocketManagerModal: React.FC<PocketManagerModalProps> = ({
               <button
                 type="button"
                 onClick={handleConfirmDelete}
-                disabled={isDeletingPocket}
+                disabled={deleteInProgress}
                 className="px-3.5 py-1.5 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg transition cursor-pointer disabled:cursor-wait disabled:opacity-60"
               >
-                {isDeletingPocket ? 'Menghapus dari Sheets...' : 'Ya, Hapus'}
+                {deleteInProgress ? 'Menghapus dari Sheets...' : 'Ya, Hapus'}
               </button>
             </div>
           </div>

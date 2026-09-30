@@ -31,7 +31,7 @@ interface PocketDetailViewProps {
   onBack: () => void;
   onTopUp: (pocketId: string) => void;
   onWithdraw: (pocketId: string) => void;
-  onUpdateMarketRate: (pocketId: string, manualMarketRate: number) => Promise<boolean>;
+  onUpdateMarketRate: (pocketId: string, manualMarketRate: number, marketValue: number) => Promise<boolean>;
   onOpenPocketManager: () => void;
   onEditTransaction: (tx: LedgerTransaction) => void;
   onDeleteTransaction: (id: string) => void;
@@ -55,7 +55,9 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
   const supportsManualValuation =
     pocket.instrumentType === 'LOGAM_MULIA' ||
     pocket.instrumentType === 'REKSADANA' ||
-    pocket.instrumentType === 'SAHAM_ETF';
+    pocket.instrumentType === 'SAHAM_ETF' ||
+    pocket.instrumentType === 'SINKING_FUND' ||
+    pocket.instrumentType === 'ASET_FISIK';
   const [isMarketValueModalOpen, setIsMarketValueModalOpen] = useState(false);
   const [marketValueInput, setMarketValueInput] = useState('');
   const [isSavingMarketValue, setIsSavingMarketValue] = useState(false);
@@ -63,9 +65,11 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
   useEffect(() => {
     if (!isMarketValueModalOpen) return;
     setMarketValueInput(
-      pocket.manualMarketRate ? String(Math.round(pocket.marketValueIdr)) : ''
+      pocket.manualMarketValue !== undefined || pocket.manualMarketRate
+        ? String(Math.round(pocket.marketValueIdr))
+        : ''
     );
-  }, [isMarketValueModalOpen, pocket.manualMarketRate]);
+  }, [isMarketValueModalOpen, pocket.manualMarketRate, pocket.manualMarketValue, pocket.marketValueIdr]);
 
   const parsedMarketInput = Number(marketValueInput.replace(/[^0-9]/g, '')) || 0;
   const previewMarketValue = parsedMarketInput;
@@ -98,7 +102,7 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
   const saveMarketValue = async () => {
     if (previewMarketRate <= 0 || pocket.balanceNative <= 0) return;
     setIsSavingMarketValue(true);
-    const saved = await onUpdateMarketRate(pocket.pocketId, previewMarketRate);
+    const saved = await onUpdateMarketRate(pocket.pocketId, previewMarketRate, previewMarketValue);
     setIsSavingMarketValue(false);
     if (saved) setIsMarketValueModalOpen(false);
   };

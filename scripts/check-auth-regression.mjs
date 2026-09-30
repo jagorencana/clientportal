@@ -73,7 +73,29 @@ const ledgerService = read('src/services/ledgerApiService.ts');
 expect(ledgerService.includes('VITE_LEDGER_GAS_URL'), 'Konfigurasi URL ledger hilang');
 expect(ledgerService.includes('action=get_ledger_data'), 'Kontrak GET ledger hilang');
 expect(ledgerService.includes("action: 'sync_ledger_pockets'"), 'Kontrak sync_ledger_pockets hilang');
+expect(ledgerService.includes("action: 'save_ledger_transaction'"), 'Kontrak save_ledger_transaction hilang');
+expect(ledgerService.includes("action: 'delete_ledger_transaction'"), 'Kontrak delete_ledger_transaction hilang');
 expect(!ledgerService.includes("'/api/ledger-proxy'"), 'Ledger kembali memakai proxy relatif lama');
+expect(
+  ledgerService.includes("const LEDGER_CACHE_PREFIX = 'wl_pockets_cache'") &&
+    ledgerService.includes('LEGACY_LEDGER_CACHE_PREFIX') &&
+    ledgerService.includes('cacheTenantEmail: email') &&
+    ledgerService.includes("Cache Wealth Ledger ditolak karena tenant tidak cocok"),
+  'Cache key Wealth Ledger atau migrasi cache lama hilang'
+);
+expect(
+  ledgerService.includes("/aset fisik|operasional|kendaraan|properti|property|inventaris/") &&
+    ledgerService.includes("/reksa\\s*dana|reksadana|mutual fund/") &&
+    ledgerService.includes("/saham|etf|efek|equity/") &&
+    ledgerService.includes("'SINKING_FUND'") &&
+    ledgerService.includes('const normalizedPocket = normalizeRemotePocket(p, idx)'),
+  'Normalisasi kategori Wealth Ledger tidak lengkap'
+);
+expect(
+  ledgerService.includes('DELETE_POCKET_TIMEOUT_MS = 10_000') &&
+    ledgerService.includes('}, DELETE_POCKET_TIMEOUT_MS)'),
+  'Cascade delete kantong tidak memakai timeout khusus 10 detik'
+);
 
 const currencyService = read('src/services/currencyService.ts');
 expect(currencyService.includes('export function buildLiveFxRateMap'), 'Mapper rate pusat Live FX hilang');
@@ -138,6 +160,13 @@ expect(
   'Fallback cache Wealth Ledger hilang'
 );
 expect(
+  ledgerService.includes('export const loadCachedLedgerData') &&
+    wealthLedgerView.includes('loadCachedLedgerData(effectiveEmail)') &&
+    wealthLedgerView.includes('silentRevalidation') &&
+    wealthLedgerView.includes('setIsLedgerLoading(!cached)'),
+  'Strategi cache-first stale-while-revalidate Wealth Ledger hilang'
+);
+expect(
   wealthLedgerView.includes('new Map<string, AssetPocket>()') &&
     wealthLedgerView.includes('pocketId?: string'),
   'Deduplikasi pocketId sebelum state UI hilang'
@@ -153,8 +182,51 @@ expect(
     wealthLedgerView.includes('marketRates={liveFxRates}'),
   'Consumer Wealth Ledger belum seluruhnya memakai Live FX rate map'
 );
+expect(
+  wealthLedgerView.includes('mutationVersionAtStart !== ledgerMutationVersionRef.current') &&
+    wealthLedgerView.includes('(pendingLedgerWritesRef.current.get(email) || 0) > 0') &&
+    wealthLedgerView.includes("fetchRemoteLedgerData(email, { persistCache: false })"),
+  'Guard race condition SWR terhadap write lokal hilang'
+);
+expect(
+  wealthLedgerView.includes('const enqueueLedgerWrite') &&
+    wealthLedgerView.includes('isLedgerMutationSuccess(result)') &&
+    wealthLedgerView.includes('finishLedgerWrite(mutationTenant)'),
+  'Write ledger belum diserialisasi atau kegagalan API belum ditangani eksplisit'
+);
+expect(
+  wealthLedgerView.includes("showToast('Gagal menghapus kantong dari Google Sheets, silakan coba lagi')") &&
+    wealthLedgerView.includes('void loadLedgerData(false, true)') &&
+    wealthLedgerView.includes('relatedTransactions.forEach'),
+  'Delete kantong tidak memiliki toast, re-fetch sukses, dan rollback defensif'
+);
+
+const pocketManagerModal = read('src/components/wealth-ledger/PocketManagerModal.tsx');
+expect(
+  pocketManagerModal.includes('const [isConfirmDeleting, setIsConfirmDeleting]') &&
+    pocketManagerModal.includes("console.warn('Penghapusan kantong gagal:'") &&
+    pocketManagerModal.includes('finally {') &&
+    pocketManagerModal.includes('setPocketToDelete(null)'),
+  'Modal delete kantong tidak menjamin reset loading dan penutupan lewat finally'
+);
 
 const gasBackend = read('google-apps-script/Code.gs');
+expect(
+  gasBackend.includes('function normalizePocketInstrumentType') &&
+    gasBackend.includes('function normalizePocketCategory') &&
+    gasBackend.includes("record.category = String(value || '').trim()") &&
+    gasBackend.includes("record.marketValue = value") &&
+    gasBackend.includes("'category', 'sortOrder', 'marketValue', 'manualMarketRate'") &&
+    gasBackend.includes("action === 'update_ledger_pocket_market_value'"),
+  'Normalisasi kategori di backend Apps Script hilang'
+);
+expect(
+  gasBackend.includes("action === 'save_ledger_transaction'") &&
+    gasBackend.includes('function handleSaveLedgerTransaction') &&
+    gasBackend.includes("action === 'delete_ledger_transaction'") &&
+    gasBackend.includes('function handleDeleteLedgerTransaction'),
+  'Route simpan/hapus transaksi Wealth Ledger di Apps Script hilang'
+);
 const upsertStart = gasBackend.indexOf('function upsertTenantPockets');
 const upsertEnd = gasBackend.indexOf('function restoreOrphanPocketMasters', upsertStart);
 const upsertPocketSource = gasBackend.slice(upsertStart, upsertEnd);

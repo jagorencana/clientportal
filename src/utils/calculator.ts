@@ -82,8 +82,12 @@ export function computeCurrencyPocketSummary(
   const supportsManualValuation =
     pocket.instrumentType === 'LOGAM_MULIA' ||
     pocket.instrumentType === 'REKSADANA' ||
-    pocket.instrumentType === 'SAHAM_ETF';
+    pocket.instrumentType === 'SAHAM_ETF' ||
+    pocket.instrumentType === 'SINKING_FUND' ||
+    pocket.instrumentType === 'ASET_FISIK';
   const manualMarketRate = Number(pocket.manualMarketRate || 0);
+  const storedMarketValue = Number(pocket.marketValue);
+  const hasStoredMarketValue = Number.isFinite(storedMarketValue) && storedMarketValue >= 0;
   const effectiveSpotRate =
     supportsManualValuation && manualMarketRate > 0
       ? manualMarketRate
@@ -92,7 +96,10 @@ export function computeCurrencyPocketSummary(
         : currentMarketRate > 0
           ? currentMarketRate
           : averageBuyRate;
-  const marketValueIdr = balanceNative * effectiveSpotRate;
+  // Total marketValue yang diinput user selalu menang atas kalkulasi cost basis/rate.
+  const marketValueIdr = supportsManualValuation && hasStoredMarketValue
+    ? storedMarketValue
+    : balanceNative * effectiveSpotRate;
   const unrealizedPnlIdr = marketValueIdr - totalCostBasisIdr;
   const unrealizedPnlPercent =
     totalCostBasisIdr > 0 ? (unrealizedPnlIdr / totalCostBasisIdr) * 100 : 0;
@@ -114,6 +121,7 @@ export function computeCurrencyPocketSummary(
     averageBuyRate,
     currentMarketRate: effectiveSpotRate,
     manualMarketRate: manualMarketRate > 0 ? manualMarketRate : undefined,
+    manualMarketValue: hasStoredMarketValue ? storedMarketValue : undefined,
     lastPriceUpdatedAt: pocket.lastPriceUpdatedAt,
     marketValueIdr,
     unrealizedPnlIdr,
