@@ -172,6 +172,8 @@ function readTenantLedgerRows(sheet, userEmail) {
         if (normalizedHeader === 'poscategory') record.posCategory = value;
         if (normalizedHeader === 'manualmarketrate' || normalizedHeader === 'manualrate') record.manualMarketRate = value;
         if (normalizedHeader === 'marketvalue' || normalizedHeader === 'marketvalueidr') record.marketValue = value;
+        if (normalizedHeader === 'marketvaluenative') record.marketValueNative = value;
+        if (normalizedHeader === 'marketvaluecurrency') record.marketValueCurrency = String(value || '').trim().toUpperCase();
         if (normalizedHeader === 'lastpriceupdatedat' || normalizedHeader === 'priceupdatedat') record.lastPriceUpdatedAt = value;
       }
     }
@@ -478,7 +480,8 @@ function normalizeLedgerHeader(value) {
 function ensureLedgerPocketHeaders(sheet) {
   const required = [
     'id', 'userEmail', 'name', 'instrumentType', 'currency', 'custodian',
-    'category', 'sortOrder', 'marketValue', 'manualMarketRate', 'lastPriceUpdatedAt', 'updatedAt'
+    'category', 'sortOrder', 'marketValue', 'marketValueNative', 'marketValueCurrency',
+    'manualMarketRate', 'lastPriceUpdatedAt', 'updatedAt'
   ];
   if (sheet.getLastRow() < 1 || sheet.getLastColumn() < 1) {
     sheet.getRange(1, 1, 1, required.length).setValues([required]);
@@ -514,6 +517,15 @@ function canonicalPocketValue(pocket, normalizedHeader, userEmail) {
     if (!Object.prototype.hasOwnProperty.call(pocket, 'marketValue') && !Object.prototype.hasOwnProperty.call(pocket, 'marketValueIdr')) return undefined;
     const marketValue = Number(pocket.marketValue !== undefined ? pocket.marketValue : pocket.marketValueIdr);
     return isFinite(marketValue) && marketValue >= 0 ? marketValue : undefined;
+  }
+  if (normalizedHeader === 'marketvaluenative') {
+    if (!Object.prototype.hasOwnProperty.call(pocket, 'marketValueNative')) return undefined;
+    const nativeValue = Number(pocket.marketValueNative);
+    return isFinite(nativeValue) && nativeValue > 0 ? nativeValue : undefined;
+  }
+  if (normalizedHeader === 'marketvaluecurrency') {
+    if (!Object.prototype.hasOwnProperty.call(pocket, 'marketValueNative')) return undefined;
+    return sanitizeInput(pocket.marketValueCurrency || pocket.currency || pocket.currencyCode || 'IDR').toUpperCase();
   }
   if (normalizedHeader === 'manualmarketrate' || normalizedHeader === 'manualrate') {
     if (!Object.prototype.hasOwnProperty.call(pocket, 'manualMarketRate') && !Object.prototype.hasOwnProperty.call(pocket, 'manualRate')) return undefined;
@@ -704,10 +716,14 @@ function handleUpdateLedgerPocketMarketRate(payload) {
   const manualMarketRate = Number(payload.manualMarketRate);
   const hasMarketValue = payload.marketValue !== undefined || payload.marketValueIdr !== undefined;
   const marketValue = Number(payload.marketValue !== undefined ? payload.marketValue : payload.marketValueIdr);
+  const hasNativeMarketValue = payload.marketValueNative !== undefined;
+  const marketValueNative = Number(payload.marketValueNative);
+  const marketValueCurrency = sanitizeInput(payload.marketValueCurrency || 'IDR').toUpperCase();
   const lastPriceUpdatedAt = sanitizeInput(payload.lastPriceUpdatedAt || new Date().toISOString());
 
   if (!userEmail || !pocketId || !isFinite(manualMarketRate) || manualMarketRate <= 0 ||
-      (hasMarketValue && (!isFinite(marketValue) || marketValue < 0))) {
+      (hasMarketValue && (!isFinite(marketValue) || marketValue < 0)) ||
+      (hasNativeMarketValue && (!isFinite(marketValueNative) || marketValueNative <= 0 || !marketValueCurrency))) {
     return createJsonResponse({ status: 'error', success: false, message: 'Data harga pasar tidak valid.' });
   }
 
@@ -742,6 +758,18 @@ function handleUpdateLedgerPocketMarketRate(payload) {
       marketValueIndex = lastColumn;
       lastColumn += 1;
     }
+    let nativeValueIndex = normalized.indexOf('marketvaluenative');
+    if (nativeValueIndex < 0) {
+      sheet.getRange(1, lastColumn + 1).setValue('marketValueNative');
+      nativeValueIndex = lastColumn;
+      lastColumn += 1;
+    }
+    let marketCurrencyIndex = normalized.indexOf('marketvaluecurrency');
+    if (marketCurrencyIndex < 0) {
+      sheet.getRange(1, lastColumn + 1).setValue('marketValueCurrency');
+      marketCurrencyIndex = lastColumn;
+      lastColumn += 1;
+    }
     let updatedAtIndex = normalized.indexOf('lastpriceupdatedat');
     if (updatedAtIndex < 0) {
       sheet.getRange(1, lastColumn + 1).setValue('lastPriceUpdatedAt');
@@ -757,9 +785,13 @@ function handleUpdateLedgerPocketMarketRate(payload) {
         const sheetRow = index + 2;
         sheet.getRange(sheetRow, rateIndex + 1).setValue(manualMarketRate);
         if (hasMarketValue) sheet.getRange(sheetRow, marketValueIndex + 1).setValue(marketValue);
+        if (hasNativeMarketValue && isFinite(marketValueNative) && marketValueNative > 0) {
+          sheet.getRange(sheetRow, nativeValueIndex + 1).setValue(marketValueNative);
+          sheet.getRange(sheetRow, marketCurrencyIndex + 1).setValue(marketValueCurrency);
+        }
         sheet.getRange(sheetRow, updatedAtIndex + 1).setValue(lastPriceUpdatedAt);
         SpreadsheetApp.flush();
-        return createJsonResponse({ status: 'success', success: true, pocketId: pocketId, manualMarketRate: manualMarketRate, marketValue: hasMarketValue ? marketValue : undefined, lastPriceUpdatedAt: lastPriceUpdatedAt });
+        return createJsonResponse({ status: 'success', success: true, pocketId: pocketId, manualMarketRate: manualMarketRate, marketValue: hasMarketValue ? marketValue : undefined, marketValueNative: hasNativeMarketValue ? marketValueNative : undefined, marketValueCurrency: hasNativeMarketValue ? marketValueCurrency : undefined, lastPriceUpdatedAt: lastPriceUpdatedAt });
       }
     }
 

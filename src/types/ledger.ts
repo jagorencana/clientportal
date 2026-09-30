@@ -25,6 +25,8 @@ export interface AssetPocket {
   manualMarketPrice?: number;  // Used for Gold (XAU), Reksadana NAV, or manual overrides
   manualMarketRate?: number;   // Harga pasar / NAB manual per unit dalam IDR
   marketValue?: number;        // Total nilai pasar manual; menjadi override hingga user memperbaruinya
+  marketValueNative?: number;  // Total nilai pasar dalam denominasi asli (mis. USD)
+  marketValueCurrency?: string;// Mata uang marketValueNative
   lastPriceUpdatedAt?: string; // ISO timestamp pembaruan harga manual terakhir
   isDefault?: boolean;
   sortOrder?: number;          // Google Sheets sortOrder
@@ -89,6 +91,8 @@ export interface CurrencyPocketSummary {
   currentMarketRate: number;   // Kurs pasar terkini
   manualMarketRate?: number;   // Harga pasar / NAB manual per unit dalam IDR
   manualMarketValue?: number;  // Total nilai pasar manual tersimpan
+  manualMarketValueNative?: number;
+  marketValueCurrency?: string;
   lastPriceUpdatedAt?: string; // ISO timestamp pembaruan harga manual terakhir
   marketValueIdr: number;      // balanceNative * currentMarketRate
   unrealizedPnlIdr: number;    // marketValueIdr - totalCostBasisIdr

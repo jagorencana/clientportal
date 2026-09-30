@@ -31,7 +31,13 @@ interface PocketDetailViewProps {
   onBack: () => void;
   onTopUp: (pocketId: string) => void;
   onWithdraw: (pocketId: string) => void;
-  onUpdateMarketRate: (pocketId: string, manualMarketRate: number, marketValue: number) => Promise<boolean>;
+  onUpdateMarketRate: (
+    pocketId: string,
+    manualMarketRate: number,
+    marketValue: number,
+    marketValueNative: number,
+    marketValueCurrency: string
+  ) => Promise<boolean>;
   onOpenPocketManager: () => void;
   onEditTransaction: (tx: LedgerTransaction) => void;
   onDeleteTransaction: (id: string) => void;
@@ -61,18 +67,26 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
   const [isMarketValueModalOpen, setIsMarketValueModalOpen] = useState(false);
   const [marketValueInput, setMarketValueInput] = useState('');
   const [isSavingMarketValue, setIsSavingMarketValue] = useState(false);
+  const marketValueCurrency = (pocket.currency || 'IDR').toUpperCase();
+  const isForeignMarketValue = marketValueCurrency !== 'IDR';
 
   useEffect(() => {
     if (!isMarketValueModalOpen) return;
     setMarketValueInput(
-      pocket.manualMarketValue !== undefined || pocket.manualMarketRate
-        ? String(Math.round(pocket.marketValueIdr))
+      pocket.manualMarketValueNative !== undefined
+        ? String(pocket.manualMarketValueNative)
+        : pocket.manualMarketValue !== undefined || pocket.manualMarketRate
+        ? String(isForeignMarketValue
+            ? Number((pocket.marketValueIdr / Math.max(pocket.currentMarketRate, 1)).toFixed(2))
+            : Math.round(pocket.marketValueIdr))
         : ''
     );
-  }, [isMarketValueModalOpen, pocket.manualMarketRate, pocket.manualMarketValue, pocket.marketValueIdr]);
+  }, [isMarketValueModalOpen, pocket.manualMarketRate, pocket.manualMarketValue, pocket.manualMarketValueNative, pocket.marketValueIdr, pocket.currentMarketRate, isForeignMarketValue]);
 
-  const parsedMarketInput = Number(marketValueInput.replace(/[^0-9]/g, '')) || 0;
-  const previewMarketValue = parsedMarketInput;
+  const parsedMarketInput = Number(marketValueInput) || 0;
+  const previewMarketValue = isForeignMarketValue
+    ? parsedMarketInput * pocket.currentMarketRate
+    : parsedMarketInput;
   const previewMarketRate = pocket.balanceNative > 0
     ? previewMarketValue / pocket.balanceNative
     : 0;
@@ -102,7 +116,13 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
   const saveMarketValue = async () => {
     if (previewMarketRate <= 0 || pocket.balanceNative <= 0) return;
     setIsSavingMarketValue(true);
-    const saved = await onUpdateMarketRate(pocket.pocketId, previewMarketRate, previewMarketValue);
+    const saved = await onUpdateMarketRate(
+      pocket.pocketId,
+      previewMarketRate,
+      previewMarketValue,
+      parsedMarketInput,
+      marketValueCurrency
+    );
     setIsSavingMarketValue(false);
     if (saved) setIsMarketValueModalOpen(false);
   };
@@ -367,14 +387,18 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
             </div>
 
             <label className="mt-5 block text-xs font-bold text-slate-700">
-              Total Nilai Portofolio Saat Ini (Rp)
+              Total Nilai Portofolio Saat Ini ({marketValueCurrency})
               <div className="mt-1.5 flex items-center rounded-xl border border-slate-300 bg-white px-3 focus-within:border-teal-500 focus-within:ring-2 focus-within:ring-teal-100">
-                <span className="text-sm font-bold text-slate-500">Rp</span>
+                <span className="text-sm font-bold text-slate-500">{isForeignMarketValue ? marketValueCurrency : 'Rp'}</span>
                 <input
                   autoFocus
                   inputMode="numeric"
                   value={marketValueInput}
-                  onChange={(event) => setMarketValueInput(event.target.value.replace(/[^0-9]/g, ''))}
+                  onChange={(event) => {
+                    const sanitized = event.target.value.replace(/[^0-9.]/g, '');
+                    const [whole, ...decimals] = sanitized.split('.');
+                    setMarketValueInput(decimals.length ? `${whole}.${decimals.join('').slice(0, 2)}` : whole);
+                  }}
                   placeholder="0"
                   className="min-w-0 flex-1 border-0 bg-transparent px-2 py-3 text-right text-base font-bold tabular-nums text-slate-900 outline-none"
                 />
@@ -384,6 +408,9 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
             <div className="mt-4 space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs tabular-nums">
               <div className="flex justify-between gap-3 text-slate-600"><span>Modal Pokok</span><strong className="text-slate-900">{formatIdr(pocket.totalCostBasisIdr)}</strong></div>
               <div className="flex justify-between gap-3 text-slate-600"><span>Estimasi Nilai Pasar Baru</span><strong className="text-slate-900">{formatIdr(previewMarketValue)}</strong></div>
+              {isForeignMarketValue && (
+                <div className="flex justify-between gap-3 text-slate-600"><span>Kurs Spot {marketValueCurrency}</span><strong className="text-slate-900">Rp {formatRate(pocket.currentMarketRate, marketValueCurrency)}</strong></div>
+              )}
               <div className="border-t border-slate-200 pt-2 flex justify-between gap-3"><span className="font-semibold text-slate-700">Estimasi Floating P/L</span><strong className={previewPnl >= 0 ? 'text-emerald-700' : 'text-rose-700'}>{formatIdr(previewPnl)} ({formatPercent(previewPnlPercent)})</strong></div>
             </div>
 

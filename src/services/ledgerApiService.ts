@@ -163,6 +163,16 @@ export const normalizeRemotePocket = (p: any, idx: number = 0): AssetPocket => {
   const marketValue = Number.isFinite(parsedMarketValue) && parsedMarketValue > 0
     ? parsedMarketValue
     : undefined;
+  const rawNativeMarketValue = p.marketValueNative;
+  const parsedNativeMarketValue = rawNativeMarketValue === '' || rawNativeMarketValue === null || rawNativeMarketValue === undefined
+    ? Number.NaN
+    : Number(rawNativeMarketValue);
+  const marketValueNative = Number.isFinite(parsedNativeMarketValue) && parsedNativeMarketValue > 0
+    ? parsedNativeMarketValue
+    : undefined;
+  const marketValueCurrency = marketValueNative
+    ? String(p.marketValueCurrency || currency).trim().toUpperCase()
+    : undefined;
 
   if (instrumentType === 'LOGAM_MULIA') {
     instrumentType = 'LOGAM_MULIA';
@@ -239,6 +249,8 @@ export const normalizeRemotePocket = (p: any, idx: number = 0): AssetPocket => {
     manualMarketPrice,
     manualMarketRate,
     marketValue,
+    marketValueNative,
+    marketValueCurrency,
     lastPriceUpdatedAt: p.lastPriceUpdatedAt || p.priceUpdatedAt || undefined,
     isDefault: p.isDefault ?? true,
     sortOrder: typeof p.sortOrder === 'number' ? p.sortOrder : idx + 1,
@@ -534,6 +546,12 @@ export const syncRemotePockets = async (
       marketValue: Number.isFinite(Number(p.marketValue)) && Number(p.marketValue) > 0
         ? Number(p.marketValue)
         : undefined,
+      marketValueNative: Number.isFinite(Number(p.marketValueNative)) && Number(p.marketValueNative) > 0
+        ? Number(p.marketValueNative)
+        : undefined,
+      marketValueCurrency: p.marketValueNative
+        ? String(p.marketValueCurrency || normalizedPocket.currencyCode).trim().toUpperCase()
+        : undefined,
       lastPriceUpdatedAt: p.lastPriceUpdatedAt || '',
       updatedAt: p.updatedAt || nowIso,
     };
@@ -560,15 +578,19 @@ export const updateRemotePocketMarketRate = async (
   manualMarketRate: number,
   lastPriceUpdatedAt: string,
   userEmail: string = currentUserEmail,
-  marketValue?: number
+  marketValue?: number,
+  marketValueNative?: number,
+  marketValueCurrency?: string
 ): Promise<{ success: boolean; message?: string; [key: string]: any } | null> => {
   try {
     const emailToUse = resolveUserEmail(userEmail);
     const normalizedPocketId = String(pocketId || '').trim();
     const rate = Number(manualMarketRate);
     const totalMarketValue = Number(marketValue);
+    const nativeMarketValue = Number(marketValueNative);
     if (!emailToUse || !normalizedPocketId || !Number.isFinite(rate) || rate <= 0) return null;
     if (marketValue !== undefined && (!Number.isFinite(totalMarketValue) || totalMarketValue < 0)) return null;
+    if (marketValueNative !== undefined && (!Number.isFinite(nativeMarketValue) || nativeMarketValue <= 0)) return null;
 
     const res = await executeApiRequest('', {
       method: 'POST',
@@ -579,6 +601,10 @@ export const updateRemotePocketMarketRate = async (
         pocketId: normalizedPocketId,
         manualMarketRate: rate,
         marketValue: marketValue === undefined ? undefined : totalMarketValue,
+        marketValueNative: marketValueNative === undefined ? undefined : nativeMarketValue,
+        marketValueCurrency: marketValueNative === undefined
+          ? undefined
+          : String(marketValueCurrency || '').trim().toUpperCase(),
         lastPriceUpdatedAt,
       }),
     });

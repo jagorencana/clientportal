@@ -169,6 +169,8 @@ expect(
 expect(
   ledgerService.includes("rawMarketValue === ''") &&
     ledgerService.includes('parsedMarketValue > 0') &&
+    ledgerService.includes('marketValueNative') &&
+    wealthLedgerView.includes('liveFxRates[code]') &&
     wealthLedgerView.includes("pocket.instrumentType === 'SINKING_FUND'"),
   'Nilai pasar kosong masih berisiko dianggap Rp 0 atau Sinking Fund kehilangan dukungan valuasi'
 );
@@ -222,7 +224,7 @@ expect(
     gasBackend.includes('function normalizePocketCategory') &&
     gasBackend.includes("record.category = String(value || '').trim()") &&
     gasBackend.includes("record.marketValue = value") &&
-    gasBackend.includes("'category', 'sortOrder', 'marketValue', 'manualMarketRate'") &&
+    gasBackend.includes("'category', 'sortOrder', 'marketValue', 'marketValueNative', 'marketValueCurrency'") &&
     gasBackend.includes("action === 'update_ledger_pocket_market_value'"),
   'Normalisasi kategori di backend Apps Script hilang'
 );

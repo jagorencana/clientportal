@@ -498,7 +498,9 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
         pocket.instrumentType === 'SINKING_FUND' ||
         pocket.instrumentType === 'ASET_FISIK';
       const currentRate =
-        supportsManualValuation && Number(pocket.manualMarketRate) > 0
+        supportsManualValuation && Number(pocket.marketValueNative) > 0
+          ? code === 'IDR' ? 1 : liveFxRates[code] || 1
+          : supportsManualValuation && Number(pocket.manualMarketRate) > 0
           ? Number(pocket.manualMarketRate)
           : code === 'IDR'
           ? 1
@@ -730,7 +732,9 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
   const handleUpdatePocketMarketRate = async (
     pocketId: string,
     manualMarketRate: number,
-    marketValue: number
+    marketValue: number,
+    marketValueNative: number,
+    marketValueCurrency: string
   ): Promise<boolean> => {
     const normalizedPocketId = String(pocketId || '').trim();
     const rate = Number(manualMarketRate);
@@ -745,7 +749,15 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
     const lastPriceUpdatedAt = new Date().toISOString();
     const updatedPockets = pockets.map((pocket) =>
       String(pocket.id || '').trim() === normalizedPocketId
-        ? { ...pocket, manualMarketRate: rate, marketValue: totalMarketValue, lastPriceUpdatedAt, updatedAt: lastPriceUpdatedAt }
+        ? {
+            ...pocket,
+            manualMarketRate: rate,
+            marketValue: totalMarketValue,
+            marketValueNative,
+            marketValueCurrency,
+            lastPriceUpdatedAt,
+            updatedAt: lastPriceUpdatedAt,
+          }
         : pocket
     );
 
@@ -758,7 +770,9 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
         rate,
         lastPriceUpdatedAt,
         mutationTenant,
-        totalMarketValue
+        totalMarketValue,
+        marketValueNative,
+        marketValueCurrency
       ));
       if (activeTenantEmailRef.current !== mutationTenant) return false;
       if (!isLedgerMutationSuccess(result)) {

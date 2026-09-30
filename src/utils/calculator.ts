@@ -88,8 +88,11 @@ export function computeCurrencyPocketSummary(
   const manualMarketRate = Number(pocket.manualMarketRate || 0);
   const storedMarketValue = Number(pocket.marketValue);
   const hasStoredMarketValue = Number.isFinite(storedMarketValue) && storedMarketValue > 0;
+  const storedNativeMarketValue = Number(pocket.marketValueNative);
+  const hasStoredNativeMarketValue = Number.isFinite(storedNativeMarketValue) && storedNativeMarketValue > 0;
+  const storedMarketCurrency = String(pocket.marketValueCurrency || code).toUpperCase();
   const effectiveSpotRate =
-    supportsManualValuation && manualMarketRate > 0
+    supportsManualValuation && manualMarketRate > 0 && !hasStoredNativeMarketValue
       ? manualMarketRate
       : code === 'IDR'
         ? 1
@@ -98,8 +101,13 @@ export function computeCurrencyPocketSummary(
           : averageBuyRate;
   // Total marketValue yang diinput user selalu menang atas kalkulasi cost basis/rate.
   const calculatedMarketValue = balanceNative * effectiveSpotRate;
-  const marketValueIdr = supportsManualValuation && hasStoredMarketValue
-    ? storedMarketValue
+  const nativeMarketValueIdr = storedMarketCurrency === 'IDR'
+    ? storedNativeMarketValue
+    : storedNativeMarketValue * currentMarketRate;
+  const marketValueIdr = supportsManualValuation && hasStoredNativeMarketValue
+    ? nativeMarketValueIdr
+    : supportsManualValuation && hasStoredMarketValue
+      ? storedMarketValue
     : calculatedMarketValue > 0
       ? calculatedMarketValue
       : totalCostBasisIdr;
@@ -125,6 +133,8 @@ export function computeCurrencyPocketSummary(
     currentMarketRate: effectiveSpotRate,
     manualMarketRate: manualMarketRate > 0 ? manualMarketRate : undefined,
     manualMarketValue: hasStoredMarketValue ? storedMarketValue : undefined,
+    manualMarketValueNative: hasStoredNativeMarketValue ? storedNativeMarketValue : undefined,
+    marketValueCurrency: hasStoredNativeMarketValue ? storedMarketCurrency : undefined,
     lastPriceUpdatedAt: pocket.lastPriceUpdatedAt,
     marketValueIdr,
     unrealizedPnlIdr,
