@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
   CurrencyPocketSummary,
   LedgerTransaction,
@@ -143,12 +144,14 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
 
   const groupedAssets = useMemo(() => {
     const order = [
-      'Kas & Tabungan Rupiah', 'Kas Valas', 'Reksa Dana', 'Reksadana / Efek',
-      'Saham & ETF', 'Sinking Fund', 'Logam Mulia', 'Aset Fisik & Operasional',
+      'Kas & Tabungan Rupiah', 'Kas Valas', 'Investasi (Reksa Dana, Saham & ETF)',
+      'Sinking Fund', 'Logam Mulia', 'Aset Fisik & Operasional',
     ];
     const groups = new Map<string, typeof historicalData.items>();
     historicalData.items.forEach((item) => {
-      const key = item.categoryLabel || 'Lainnya';
+      const key = /reksa\s*dana|reksadana|efek|saham|etf/i.test(item.categoryLabel)
+        ? 'Investasi (Reksa Dana, Saham & ETF)'
+        : item.categoryLabel || 'Lainnya';
       const current = groups.get(key) || [];
       current.push(item);
       groups.set(key, current);
@@ -158,6 +161,7 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
         label,
         items,
         total: items.reduce((sum, item) => sum + item.historicalMarketValueIdr, 0),
+        cost: items.reduce((sum, item) => sum + item.historicalCostBasisIdr, 0),
       }))
       .sort((a, b) => {
         const aIndex = order.indexOf(a.label);
@@ -193,7 +197,7 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
 
   if (!isOpen) return null;
 
-  return (
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -272,17 +276,17 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
         </div>
 
         {/* Scrollable Document Preview Area */}
-        <div className="overflow-y-auto flex-1 p-3 sm:p-6 flex justify-center bg-slate-200/70">
+        <div className="report-preview-scroll overflow-y-auto flex-1 min-h-0 p-3 sm:p-6 bg-slate-200/70">
           {/* Printable Sheet (Standard A4 Dimension emulation) */}
           <div
             id="printable-monthly-report"
-            className="monthly-report-print-root w-full max-w-[210mm] min-h-[297mm] p-6 sm:p-10 bg-white text-slate-900 shadow-xl border border-slate-200/80 rounded-xl space-y-6 print:shadow-none print:border-none print:p-0 print:m-0 print:min-h-0 print:overflow-visible print:rounded-none font-sans tabular-nums"
+            className="monthly-report-print-root mx-auto w-full max-w-[210mm] min-h-[297mm] p-6 sm:p-10 bg-white text-slate-900 shadow-xl border border-slate-200/80 rounded-xl space-y-6 print:shadow-none print:border-none print:p-0 print:m-0 print:min-h-0 print:overflow-visible print:rounded-none font-sans tabular-nums"
           >
             {/* 1. Header Dokumen Resmi */}
             <div className="report-document-header flex items-start justify-between border-b-2 border-slate-900 pb-5">
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
-                  <img src="/logo-jr.png" alt="Jago Rencana" className="h-9 w-9 object-contain" />
+                  <img src="/reporticon.png" alt="Jago Rencana" className="h-10 w-auto max-w-[160px] object-contain shrink-0" />
                   <h1 className="text-xl font-extrabold text-slate-900 tracking-tight font-sans">
                     Wealth Ledger
                   </h1>
@@ -380,12 +384,13 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                 <table className="w-full text-left text-[10px] border-collapse table-fixed">
                   <thead>
                     <tr className="bg-slate-100 text-slate-600 font-bold border-b border-slate-200 font-sans">
-                      <th className="w-[23%] py-2.5 px-2.5">Kantong</th>
-                      <th className="w-[19%] py-2.5 px-2">Kustodian</th>
-                      <th className="w-[17%] py-2.5 px-2 text-right">Saldo Native</th>
-                      <th className="w-[14%] py-2.5 px-2 text-right">Rate Valuasi</th>
-                      <th className="w-[19%] py-2.5 px-2 text-right">Nilai Pasar IDR</th>
-                      <th className="w-[8%] py-2.5 px-2 text-right">Porsi</th>
+                      <th className="w-[21%] py-2.5 px-2">Kantong</th>
+                      <th className="w-[17%] py-2.5 px-2">Kustodian</th>
+                      <th className="w-[15%] py-2.5 px-2 text-right">Saldo Native</th>
+                      <th className="w-[12%] py-2.5 px-2 text-right">Rate Valuasi</th>
+                      <th className="w-[18%] py-2.5 px-2 text-right">Nilai Pasar IDR</th>
+                      <th className="w-[7%] py-2.5 px-1 text-right">Porsi</th>
+                      <th className="w-[10%] py-2.5 px-1 text-right">Floating P/L (%)</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -399,6 +404,9 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                           <td className="px-2 py-1.5 text-right font-semibold">
                             {historicalData.totalMarketValue > 0 ? `${((group.total / historicalData.totalMarketValue) * 100).toFixed(1)}%` : '0.0%'}
                           </td>
+                          <td className="px-1 py-1.5 text-right font-semibold whitespace-nowrap">
+                            {group.cost > 0 ? formatPercent(((group.total - group.cost) / group.cost) * 100) : '—'}
+                          </td>
                         </tr>
                         {group.items.map((p) => {
                       const sharePercent =
@@ -407,17 +415,19 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                           : 0;
 
                       return (
-                        <tr key={p.pocketId} className="hover:bg-slate-50/50">
+                        <tr key={p.pocketId} className="report-pocket-row hover:bg-slate-50/50">
                           <td className="py-2 px-2.5 font-semibold text-slate-800 font-sans">
-                            <div className="flex items-center gap-1.5">
-                              <span className="font-sans text-[10px] font-bold px-1.5 py-0.5 bg-slate-100 rounded text-slate-700 border border-slate-200">
+                            <div className="flex min-w-0 items-center gap-1.5">
+                              <span className="inline-flex h-5 w-8 shrink-0 items-center justify-center font-sans text-[9px] leading-none font-bold bg-slate-100 rounded text-slate-700 border border-slate-200">
                                 {p.currency}
                               </span>
-                              <span className="font-sans">{p.name || p.currencyName}</span>
+                              <span className="min-w-0 truncate font-sans" title={p.name || p.currencyName}>{p.name || p.currencyName}</span>
                             </div>
                           </td>
                           <td className="py-2 px-2 text-[11px] text-slate-600 font-sans">
-                            {p.defaultCustodian || 'CIMB Niaga'}
+                            <div className="truncate" title={p.defaultCustodian || '—'}>
+                              {p.defaultCustodian || '—'}
+                            </div>
                           </td>
                           <td className="py-2 px-2 text-right font-sans font-medium tabular-nums text-slate-800">
                             {formatPocketBalance(
@@ -436,6 +446,11 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                           <td className="py-2 px-2 text-right font-sans font-medium tabular-nums text-slate-700">
                             {sharePercent.toFixed(1)}%
                           </td>
+                          <td className={`py-2 px-1 text-right font-semibold tabular-nums whitespace-nowrap ${p.historicalMarketValueIdr >= p.historicalCostBasisIdr ? 'text-emerald-700' : 'text-rose-700'}`}>
+                            {p.historicalCostBasisIdr > 0
+                              ? formatPercent(((p.historicalMarketValueIdr - p.historicalCostBasisIdr) / p.historicalCostBasisIdr) * 100)
+                              : '—'}
+                          </td>
                         </tr>
                       );
                         })}
@@ -452,6 +467,9 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                       </td>
                       <td className="py-2.5 px-2 text-right font-sans font-bold tabular-nums text-slate-900">
                         {historicalData.totalMarketValue > 0 ? '100.0%' : '0.0%'}
+                      </td>
+                      <td className="py-2.5 px-1 text-right tabular-nums whitespace-nowrap">
+                        {historicalData.totalCostBasis > 0 ? formatPercent(historicalData.floatingPnlPercent) : '—'}
                       </td>
                     </tr>
                   </tfoot>
@@ -534,6 +552,7 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

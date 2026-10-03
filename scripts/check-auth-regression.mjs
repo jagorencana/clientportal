@@ -120,7 +120,7 @@ const monthlyReport = read('src/components/wealth-ledger/MonthlyReportModal.tsx'
 const globalStyles = read('src/index.css');
 expect(
   monthlyReport.includes('monthly-report-print-root') &&
-    monthlyReport.includes('src="/logo-jr.png"') &&
+    monthlyReport.includes('src="/reporticon.png"') &&
     monthlyReport.includes('Posisi berjalan per') &&
     monthlyReport.includes('groupedAssets.map') &&
     monthlyReport.includes('p.marketValueIdr / p.balanceNative'),

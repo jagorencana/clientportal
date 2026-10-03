@@ -104,7 +104,28 @@
   /* Cetak laporan portofolio bulanan saja. Isolasi ini mencegah portal ikut
      terfragmentasi dan mengulang dokumen pada halaman berikutnya. */
   body:has(.monthly-report-modal) * {
-    visibility: hidden !important;
+    visibility: visible !important;
+  }
+
+  body:has(.monthly-report-modal) > :not(.monthly-report-modal) {
+    display: none !important;
+  }
+
+  body:has(.monthly-report-modal) .monthly-report-modal > div,
+  body:has(.monthly-report-modal) .report-preview-scroll {
+    display: block !important;
+    position: static !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: white !important;
+    page-break-inside: auto !important;
+    break-inside: auto !important;
   }
 
   body:has(.monthly-report-modal) .monthly-report-print-root,
@@ -121,7 +142,7 @@
   }
 
   body:has(.monthly-report-modal) .monthly-report-print-root {
-    position: absolute !important;
+    position: static !important;
     inset: 0 auto auto 0 !important;
     display: block !important;
     width: 190mm !important;
@@ -154,7 +175,12 @@
   }
 
   .monthly-report-print-root tfoot {
-    display: table-footer-group !important;
+    display: table-row-group !important;
+  }
+
+  .monthly-report-print-root .report-asset-table {
+    overflow: visible !important;
+    border-radius: 0 !important;
   }
 
   .monthly-report-print-root tr {
@@ -180,6 +206,18 @@
 .monthly-report-print-root * {
   font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif !important;
   font-variant-numeric: tabular-nums lining-nums;
+}
+
+.monthly-report-print-root .report-pocket-row {
+  height: 36px;
+}
+
+.monthly-report-print-root .report-pocket-row td {
+  vertical-align: middle;
+  white-space: nowrap;
+  line-height: 20px;
+  padding-top: 8px;
+  padding-bottom: 8px;
 }
 
 /* Custom smooth scrollbar */
