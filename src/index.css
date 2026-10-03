@@ -100,12 +100,86 @@
     border-radius: 0 !important;
     box-shadow: none !important;
   }
+
+  /* Cetak laporan portofolio bulanan saja. Isolasi ini mencegah portal ikut
+     terfragmentasi dan mengulang dokumen pada halaman berikutnya. */
+  body:has(.monthly-report-modal) * {
+    visibility: hidden !important;
+  }
+
+  body:has(.monthly-report-modal) .monthly-report-print-root,
+  body:has(.monthly-report-modal) .monthly-report-print-root * {
+    visibility: visible !important;
+  }
+
+  body:has(.monthly-report-modal) .monthly-report-modal {
+    position: static !important;
+    display: block !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    background: #FFFFFF !important;
+  }
+
+  body:has(.monthly-report-modal) .monthly-report-print-root {
+    position: absolute !important;
+    inset: 0 auto auto 0 !important;
+    display: block !important;
+    width: 190mm !important;
+    max-width: 190mm !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    font-family: 'Plus Jakarta Sans', 'Inter', Arial, sans-serif !important;
+    font-size: 8.5pt !important;
+    line-height: 1.3 !important;
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+
+  .monthly-report-print-root .report-document-header,
+  .monthly-report-print-root > div:not(.report-asset-section) {
+    break-inside: avoid-page !important;
+    page-break-inside: avoid !important;
+  }
+
+  .monthly-report-print-root table {
+    width: 100% !important;
+    table-layout: fixed !important;
+  }
+
+  .monthly-report-print-root thead {
+    display: table-header-group !important;
+  }
+
+  .monthly-report-print-root tfoot {
+    display: table-footer-group !important;
+  }
+
+  .monthly-report-print-root tr {
+    break-inside: avoid-page !important;
+    page-break-inside: avoid !important;
+  }
+
+  .monthly-report-print-root .asset-category-row {
+    break-after: avoid-page !important;
+    page-break-after: avoid !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
 }
 
 .statement-print-root,
 .statement-print-root * {
   font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif !important;
   font-variant-numeric: tabular-nums;
+}
+
+.monthly-report-print-root,
+.monthly-report-print-root * {
+  font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif !important;
+  font-variant-numeric: tabular-nums lining-nums;
 }
 
 /* Custom smooth scrollbar */

@@ -116,6 +116,23 @@ expect(reportService.includes('exportLedgerTransactionsToCsv'), 'Eksportir CSV l
 expect(reportService.includes("'ID Transaksi'"), 'Header CSV ledger tidak lengkap');
 expect(reportService.includes('URL.createObjectURL'), 'Blob downloader CSV ledger hilang');
 
+const monthlyReport = read('src/components/wealth-ledger/MonthlyReportModal.tsx');
+const globalStyles = read('src/index.css');
+expect(
+  monthlyReport.includes('monthly-report-print-root') &&
+    monthlyReport.includes('src="/logo-jr.png"') &&
+    monthlyReport.includes('Posisi berjalan per') &&
+    monthlyReport.includes('groupedAssets.map') &&
+    monthlyReport.includes('p.marketValueIdr / p.balanceNative'),
+  'Branding, basis posisi, grouping kategori, atau sumber nilai pasar laporan bulanan hilang'
+);
+expect(
+  globalStyles.includes('body:has(.monthly-report-modal)') &&
+    globalStyles.includes('display: table-header-group') &&
+    globalStyles.includes('page-break-inside: avoid'),
+  'Isolasi cetak atau kontrol page-break laporan bulanan hilang'
+);
+
 const calculations = read('src/utils/calculations.ts');
 expect(
   calculations.includes('safeIncome > 0 ? (totalSavingsAndInvestment / safeIncome) * 100 : 0'),

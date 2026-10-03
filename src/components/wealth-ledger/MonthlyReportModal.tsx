@@ -18,7 +18,6 @@ import {
   Calendar,
   TrendingUp,
   TrendingDown,
-  Landmark,
   ArrowDownLeft,
   ArrowUpRight,
   Wallet,
@@ -49,15 +48,21 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
   ];
 
   const periodLabel = `${monthNames[selectedMonth]} ${selectedYear}`;
-  const currentDateStr = formatDate(now.toISOString().split('T')[0]);
+  const todayDateStr = now.toISOString().split('T')[0];
+  const currentDateStr = formatDate(todayDateStr);
 
   // =========================================================================
   // 3. LOGIKA HISTORICAL CUT-OFF BULANAN (TUTUP BUKU RIIL)
   // =========================================================================
   // Tentukan tanggal cut-off akhir bulan yang dipilih
   const lastDayOfMonth = new Date(selectedYear, selectedMonth, 0).getDate();
-  const cutOffDateStr = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-${String(lastDayOfMonth).padStart(2, '0')}`;
+  const periodEndDateStr = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-${String(lastDayOfMonth).padStart(2, '0')}`;
+  const cutOffDateStr = periodEndDateStr < todayDateStr ? periodEndDateStr : todayDateStr;
   const firstDayDateStr = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-01`;
+  const isClosedPeriod = periodEndDateStr < todayDateStr;
+  const positionBasisLabel = isClosedPeriod
+    ? `Posisi akhir bulan per ${formatDate(cutOffDateStr)}`
+    : `Posisi berjalan per ${formatDate(cutOffDateStr)}`;
 
   // 1. NERACA POSISI ASET (SALDO HISTORIS PER KANTONG HINGGA CUT-OFF)
   const historicalData = useMemo(() => {
@@ -98,11 +103,17 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
       });
 
       const historicalCostBasisIdr = historicalBalanceNative > 0 ? runningCost : 0;
-      const spotRate = p.currency === 'IDR' ? 1 : (p.currentMarketRate || 1);
-      const historicalMarketValueIdr =
-        p.currency === 'IDR'
-          ? historicalBalanceNative
-          : historicalBalanceNative * spotRate;
+      // Gunakan nilai pasar per unit dari summary aktif. Ini menghormati manual Market Value/NAB,
+      // sementara valas native tetap mengikuti kurs spot pusat terbaru.
+      const valuationRate = p.balanceNative > 0 && p.marketValueIdr > 0
+        ? p.marketValueIdr / p.balanceNative
+        : p.currency === 'IDR'
+          ? 1
+          : (p.currentMarketRate || p.averageBuyRate || 1);
+      const historicalMarketValueIdr = historicalBalanceNative > 0
+        ? historicalBalanceNative * valuationRate
+        : 0;
+      const categoryLabel = getPocketTypeLabel(p.currency, p.instrumentType);
 
       totalMarketValue += historicalMarketValueIdr;
       totalCostBasis += historicalCostBasisIdr;
@@ -112,7 +123,8 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
         historicalBalanceNative,
         historicalCostBasisIdr,
         historicalMarketValueIdr,
-        spotRate,
+        spotRate: valuationRate,
+        categoryLabel,
       };
     });
 
@@ -128,6 +140,31 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
       floatingPnlPercent,
     };
   }, [pockets, transactions, cutOffDateStr]);
+
+  const groupedAssets = useMemo(() => {
+    const order = [
+      'Kas & Tabungan Rupiah', 'Kas Valas', 'Reksa Dana', 'Reksadana / Efek',
+      'Saham & ETF', 'Sinking Fund', 'Logam Mulia', 'Aset Fisik & Operasional',
+    ];
+    const groups = new Map<string, typeof historicalData.items>();
+    historicalData.items.forEach((item) => {
+      const key = item.categoryLabel || 'Lainnya';
+      const current = groups.get(key) || [];
+      current.push(item);
+      groups.set(key, current);
+    });
+    return Array.from(groups.entries())
+      .map(([label, items]) => ({
+        label,
+        items,
+        total: items.reduce((sum, item) => sum + item.historicalMarketValueIdr, 0),
+      }))
+      .sort((a, b) => {
+        const aIndex = order.indexOf(a.label);
+        const bIndex = order.indexOf(b.label);
+        return (aIndex < 0 ? 999 : aIndex) - (bIndex < 0 ? 999 : bIndex);
+      });
+  }, [historicalData.items]);
 
   // 2. REKAPITULASI ARUS KAS (HANYA MUTASI PADA BULAN TERPILIH)
   const currentMonthTransactions = useMemo(() => {
@@ -160,12 +197,12 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
     <div
       role="dialog"
       aria-modal="true"
-      className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 animate-in fade-in duration-150"
+      className="monthly-report-modal fixed inset-0 z-50 overflow-hidden bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 animate-in fade-in duration-150"
     >
       {/* Container Preview Dialog (Hidden on Print except printable sheet) */}
-      <div className="bg-slate-100 rounded-2xl w-full max-w-4xl shadow-2xl border border-slate-300 overflow-hidden flex flex-col max-h-[94vh]">
+      <div className="bg-slate-100 rounded-2xl w-full max-w-5xl shadow-2xl border border-slate-300 overflow-hidden flex flex-col h-[94vh]">
         {/* Top Control Bar (Never Printed) */}
-        <div className="no-print bg-white px-4 py-3 sm:px-6 sm:py-3.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 shrink-0 font-sans">
+        <div className="no-print sticky top-0 z-30 bg-white/95 backdrop-blur-md px-4 py-3 sm:px-6 sm:py-3.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 shrink-0 font-sans shadow-sm">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-[#32A89C] flex items-center justify-center text-white shrink-0">
               <FileText className="w-4 h-4" />
@@ -190,7 +227,11 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                 className="text-xs font-semibold bg-transparent text-slate-700 focus:outline-none cursor-pointer"
               >
                 {monthNames.slice(1).map((m, idx) => (
-                  <option key={m} value={idx + 1}>
+                  <option
+                    key={m}
+                    value={idx + 1}
+                    disabled={selectedYear === now.getFullYear() && idx + 1 > now.getMonth() + 1}
+                  >
                     {m}
                   </option>
                 ))}
@@ -200,7 +241,7 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                 onChange={(e) => setSelectedYear(Number(e.target.value))}
                 className="text-xs font-semibold bg-transparent text-slate-700 focus:outline-none cursor-pointer"
               >
-                {[2024, 2025, 2026, 2027].map((y) => (
+                {Array.from({ length: Math.max(1, now.getFullYear() - 2023) }, (_, idx) => 2024 + idx).map((y) => (
                   <option key={y} value={y}>
                     {y}
                   </option>
@@ -212,6 +253,7 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
             <button
               type="button"
               onClick={handlePrint}
+              title="Pada dialog cetak browser, nonaktifkan opsi Headers and footers agar URL dan tanggal browser tidak tercetak."
               className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-[#32A89C] hover:bg-[#288a80] rounded-lg shadow-xs transition cursor-pointer"
             >
               <Printer className="w-3.5 h-3.5" />
@@ -230,28 +272,26 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
         </div>
 
         {/* Scrollable Document Preview Area */}
-        <div className="overflow-y-auto p-3 sm:p-6 flex justify-center bg-slate-200/70">
+        <div className="overflow-y-auto flex-1 p-3 sm:p-6 flex justify-center bg-slate-200/70">
           {/* Printable Sheet (Standard A4 Dimension emulation) */}
           <div
             id="printable-monthly-report"
-            className="w-full max-w-[820px] max-h-[88vh] overflow-y-auto p-6 sm:p-10 pb-20 bg-white text-slate-900 shadow-xl border border-slate-200/80 rounded-2xl space-y-6 print:shadow-none print:border-none print:p-0 print:m-0 print:max-h-none print:overflow-visible print:rounded-none font-sans"
+            className="monthly-report-print-root w-full max-w-[210mm] min-h-[297mm] p-6 sm:p-10 bg-white text-slate-900 shadow-xl border border-slate-200/80 rounded-xl space-y-6 print:shadow-none print:border-none print:p-0 print:m-0 print:min-h-0 print:overflow-visible print:rounded-none font-sans tabular-nums"
           >
             {/* 1. Header Dokumen Resmi */}
-            <div className="flex items-start justify-between border-b-2 border-slate-900 pb-5">
+            <div className="report-document-header flex items-start justify-between border-b-2 border-slate-900 pb-5">
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded bg-[#32A89C] flex items-center justify-center text-white print:bg-slate-900">
-                    <Landmark className="w-4 h-4" />
-                  </div>
-                  <h1 className="text-xl font-black text-slate-900 tracking-tight font-sans">
-                    JAGO WEALTH LEDGER
+                  <img src="/logo-jr.png" alt="Jago Rencana" className="h-9 w-9 object-contain" />
+                  <h1 className="text-xl font-extrabold text-slate-900 tracking-tight font-sans">
+                    Wealth Ledger
                   </h1>
                 </div>
                 <div className="text-xs font-semibold text-slate-600 tracking-wide uppercase font-sans">
-                  Monthly Asset &amp; Wealth Statement
+                  Laporan Portofolio Aset Bulanan
                 </div>
                 <div className="text-[10px] text-slate-400 font-sans">
-                  Independently Recorded Portfolio &middot; Multi-Currency General Ledger
+                  Jago Rencana &middot; Consolidated Multi-Asset Portfolio Statement
                 </div>
               </div>
 
@@ -263,7 +303,7 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                   Tanggal Cetak: <span className="font-semibold text-slate-700">{currentDateStr}</span>
                 </div>
                 <div className="text-[10px] text-slate-400 font-sans">
-                  Cut-off: <span className="font-sans tabular-nums font-medium text-slate-600">{cutOffDateStr}</span>
+                  Basis: <span className="font-sans tabular-nums font-medium text-slate-600">{positionBasisLabel}</span>
                 </div>
               </div>
             </div>
@@ -271,19 +311,19 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
             {/* 2. Ringkasan Valuasi Portofolio (3 Kotak Metrik Sejajar) */}
             <div>
               <div className="text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-2 font-sans">
-                I. Ringkasan Posisi Nilai Kekayaan (Portfolio Net Worth)
+                I. Ringkasan Nilai Kekayaan
               </div>
               <div className="grid grid-cols-3 gap-3">
                 {/* Metrik 1: Total Net Worth Riil */}
                 <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg">
                   <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider font-sans">
-                    Total Net Worth Riil
+                    Nilai Pasar Portofolio
                   </div>
                   <div className="text-base sm:text-lg font-bold font-sans tabular-nums text-slate-900 mt-1">
                     {formatIdr(historicalData.totalMarketValue)}
                   </div>
                   <div className="text-[10px] text-slate-400 mt-0.5 font-sans">
-                    Nilai pasar per {cutOffDateStr}
+                    {positionBasisLabel}
                   </div>
                 </div>
 
@@ -329,25 +369,38 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
             </div>
 
             {/* 3. Tabel Neraca Posisi Aset (Breakdown per Kantong) */}
-            <div>
+            <div className="report-asset-section">
               <div className="text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-2 font-sans">
-                II. Neraca Posisi Aset Portofolio (Saldo per {cutOffDateStr})
+                II. Neraca Posisi Aset per Kategori
               </div>
-              <div className="overflow-x-auto w-full border border-slate-200 rounded-lg">
-                <table className="w-full min-w-[620px] text-left text-xs border-collapse">
+              <div className="mb-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[10px] leading-relaxed text-sky-900">
+                <strong>{positionBasisLabel}.</strong> Saldo menggunakan transaksi hingga tanggal tersebut. Nilai pasar memakai NAB/manual market value terakhir dan kurs spot pada saat laporan dicetak, karena histori harga pasar harian belum disimpan.
+              </div>
+              <div className="report-asset-table w-full border border-slate-200 rounded-lg overflow-hidden">
+                <table className="w-full text-left text-[10px] border-collapse table-fixed">
                   <thead>
                     <tr className="bg-slate-100 text-slate-600 font-bold border-b border-slate-200 font-sans">
-                      <th className="py-2.5 px-3">Nama Kantong</th>
-                      <th className="py-2.5 px-2">Kategori</th>
-                      <th className="py-2.5 px-2">Kustodian / Bank</th>
-                      <th className="py-2.5 px-3 text-right">Saldo Native</th>
-                      <th className="py-2.5 px-2 text-right">Kurs Spot</th>
-                      <th className="py-2.5 px-3 text-right">Nilai Pasar (IDR)</th>
-                      <th className="py-2.5 px-2 text-right">Porsi (%)</th>
+                      <th className="w-[23%] py-2.5 px-2.5">Kantong</th>
+                      <th className="w-[19%] py-2.5 px-2">Kustodian</th>
+                      <th className="w-[17%] py-2.5 px-2 text-right">Saldo Native</th>
+                      <th className="w-[14%] py-2.5 px-2 text-right">Rate Valuasi</th>
+                      <th className="w-[19%] py-2.5 px-2 text-right">Nilai Pasar IDR</th>
+                      <th className="w-[8%] py-2.5 px-2 text-right">Porsi</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {historicalData.items.map((p) => {
+                    {groupedAssets.map((group) => (
+                      <React.Fragment key={group.label}>
+                        <tr className="asset-category-row bg-slate-800 text-white">
+                          <td colSpan={4} className="px-2.5 py-1.5 font-bold uppercase tracking-wide">
+                            {group.label}
+                          </td>
+                          <td className="px-2 py-1.5 text-right font-bold">{formatIdr(group.total)}</td>
+                          <td className="px-2 py-1.5 text-right font-semibold">
+                            {historicalData.totalMarketValue > 0 ? `${((group.total / historicalData.totalMarketValue) * 100).toFixed(1)}%` : '0.0%'}
+                          </td>
+                        </tr>
+                        {group.items.map((p) => {
                       const sharePercent =
                         historicalData.totalMarketValue > 0
                           ? (p.historicalMarketValueIdr / historicalData.totalMarketValue) * 100
@@ -355,7 +408,7 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
 
                       return (
                         <tr key={p.pocketId} className="hover:bg-slate-50/50">
-                          <td className="py-2 px-3 font-semibold text-slate-800 font-sans">
+                          <td className="py-2 px-2.5 font-semibold text-slate-800 font-sans">
                             <div className="flex items-center gap-1.5">
                               <span className="font-sans text-[10px] font-bold px-1.5 py-0.5 bg-slate-100 rounded text-slate-700 border border-slate-200">
                                 {p.currency}
@@ -364,12 +417,9 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                             </div>
                           </td>
                           <td className="py-2 px-2 text-[11px] text-slate-600 font-sans">
-                            {getPocketTypeLabel(p.currency, p.instrumentType)}
-                          </td>
-                          <td className="py-2 px-2 text-[11px] text-slate-600 font-sans">
                             {p.defaultCustodian || 'CIMB Niaga'}
                           </td>
-                          <td className="py-2 px-3 text-right font-sans font-medium tabular-nums text-slate-800">
+                          <td className="py-2 px-2 text-right font-sans font-medium tabular-nums text-slate-800">
                             {formatPocketBalance(
                               p.historicalBalanceNative,
                               p.currency,
@@ -377,12 +427,10 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                               p.symbol
                             )}
                           </td>
-                          <td className="py-2 px-2 text-right font-sans font-medium tabular-nums text-slate-500 text-[11px]">
-                            {p.currency === 'IDR'
-                              ? '1.0'
-                              : `Rp ${formatRate(p.spotRate, p.currency)}`}
+                          <td className="py-2 px-2 text-right font-sans font-medium tabular-nums text-slate-500 text-[10px]">
+                            {`Rp ${formatRate(p.spotRate, p.currency)}`}
                           </td>
-                          <td className="py-2 px-3 text-right font-sans font-bold tabular-nums text-slate-900">
+                          <td className="py-2 px-2 text-right font-sans font-bold tabular-nums text-slate-900">
                             {formatIdr(p.historicalMarketValueIdr)}
                           </td>
                           <td className="py-2 px-2 text-right font-sans font-medium tabular-nums text-slate-700">
@@ -390,11 +438,13 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                           </td>
                         </tr>
                       );
-                    })}
+                        })}
+                      </React.Fragment>
+                    ))}
                   </tbody>
                   <tfoot>
                     <tr className="bg-slate-100/90 font-bold border-t-2 border-slate-300 text-slate-900">
-                      <td colSpan={5} className="py-2.5 px-3 uppercase text-[11px] font-sans">
+                      <td colSpan={4} className="py-2.5 px-3 uppercase text-[11px] font-sans">
                         Total Akumulasi Portofolio:
                       </td>
                       <td className="py-2.5 px-3 text-right font-sans font-bold tabular-nums text-sm text-slate-900">
@@ -468,17 +518,17 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                 Catatan Kepatuhan Finansial &amp; Pernyataan Buku Besar:
               </div>
               <p className="font-medium text-slate-600">
-                Catatan Valuasi: Saldo portofolio dihitung per cut-off tanggal akhir bulan terpilih, dinilai menggunakan indikasi kurs pasar spot saat laporan ini dibuat.
+                Catatan Valuasi: saldo dihitung berdasarkan transaksi hingga tanggal posisi. Nilai pasar memakai input valuasi manual/NAB terakhir serta kurs spot yang tersedia saat laporan dibuat.
               </p>
               <p>
-                Laporan ini dihasilkan secara otomatis oleh sistem <strong>Jago Wealth Ledger</strong> sebagai buku besar independen pemegang aset. Seluruh valuasi aset valas dan logam mulia dihitung berdasarkan kurs pasar acuan spot terkini serta prinsip pencatatan moving average cost basis perpetual hingga batas cut-off periode bersangkutan.
+                Laporan ini dihasilkan otomatis oleh <strong>Wealth Ledger - Jago Rencana</strong>. Nilai pasar bukan histori harga pada tanggal lampau kecuali sumber harga historis secara eksplisit tersedia; angka ditujukan untuk rekonsiliasi internal dan analisis portofolio.
               </p>
               <p>
                 Dokumen ini disusun untuk keperluan pemantauan dan rekonsiliasi kekayaan pribadi (for private wealth tracking only) tanpa memuat penawaran atau nasihat investasi perbankan publik.
               </p>
               <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-[9px] text-slate-400 font-sans tabular-nums">
                 <span>Dokumen ID: JWL-RPT-{selectedYear}{String(selectedMonth).padStart(2, '0')}-{Date.now().toString().slice(-6)}</span>
-                <span>Halaman 1 dari 1 &middot; Jago Wealth Ledger Pro v2.4</span>
+                <span>Wealth Ledger &middot; Jago Rencana</span>
               </div>
             </div>
           </div>
