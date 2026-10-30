@@ -7,6 +7,7 @@ import {
 } from '../../types/ledger';
 import { AssetAvatar } from './AssetAvatar';
 import { formatIdr, getPocketTypeLabel } from '../../utils/formatters';
+import { investmentMutationError, isRupiahInvestment, redemptionPreview } from '../../utils/investmentAccounting';
 import {
   X,
   ArrowDownLeft,
@@ -28,70 +29,11 @@ interface TransactionModalProps {
   pockets: AssetPocket[];
   transactions?: LedgerTransaction[];
   isScopedToPocket?: boolean;
+  investmentAccountingReady?: boolean;
 }
 
-/**
- * Format angka ke standar Indonesia (titik ribuan, koma desimal)
- * Contoh: 21636 -> "21.636" | 113.41 -> "113,41" | 13.08 -> "13,08"
- */
-export function formatIdNumber(
-  num: number,
-  minDec: number = 0,
-  maxDec: number = 4
-): string {
-  if (num === null || num === undefined || isNaN(num) || num === 0) return '';
-  if (Number.isInteger(num)) {
-    return num.toLocaleString('id-ID');
-  }
-  return num.toLocaleString('id-ID', {
-    minimumFractionDigits: minDec,
-    maximumFractionDigits: maxDec,
-  });
-}
-
-/**
- * Parse input string format Indonesia (atau standar) ke number murni
- * Membersihkan karakter pemisah ribuan dan karakter non-numerik lainnya secara aman
- */
-export function parseIdNumber(val: any): number {
-  if (val === null || val === undefined) return 0;
-  if (typeof val === 'number') {
-    return isNaN(val) || !isFinite(val) ? 0 : val;
-  }
-  const clean = String(val).trim();
-  if (!clean) return 0;
-
-  // Kasus 1: Mengandung titik ribuan dan koma desimal (contoh: "21.636,50" atau "1.520.000,25")
-  if (clean.includes('.') && clean.includes(',')) {
-    const sanitized = clean.replace(/\./g, '').replace(',', '.');
-    const parsed = parseFloat(sanitized.replace(/[^0-9.-]+/g, ''));
-    return isNaN(parsed) || !isFinite(parsed) ? 0 : parsed;
-  }
-
-  // Kasus 2: Mengandung koma saja sebagai desimal (contoh: "113,41" atau "13,08")
-  if (clean.includes(',')) {
-    const sanitized = clean.replace(',', '.');
-    const parsed = parseFloat(sanitized.replace(/[^0-9.-]+/g, ''));
-    return isNaN(parsed) || !isFinite(parsed) ? 0 : parsed;
-  }
-
-  // Kasus 3: Mengandung titik ribuan tanpa koma desimal (contoh: "21.636" atau "1.520.000")
-  if (/^\d{1,3}(\.\d{3})+$/.test(clean) || /^\d+\.\d{3}$/.test(clean)) {
-    const parsed = parseFloat(clean.replace(/\./g, ''));
-    return isNaN(parsed) || !isFinite(parsed) ? 0 : parsed;
-  }
-
-  // Kasus 4: Format desimal standar dengan titik (.) atau angka polos (contoh: "150000" atau "12.5")
-  const parsed = parseFloat(clean.replace(/[^0-9.-]+/g, ''));
-  return isNaN(parsed) || !isFinite(parsed) ? 0 : parsed;
-}
-
-export function cleanNumericInput(input: any): number {
-  if (typeof input === 'number') {
-    return isNaN(input) || !isFinite(input) ? 0 : input;
-  }
-  return parseIdNumber(input);
-}
+import { formatIdNumber, parseIdNumber, cleanNumericInput } from '../../utils/numberInput';
+export { formatIdNumber, parseIdNumber, cleanNumericInput } from '../../utils/numberInput';
 
 export const TransactionModal: React.FC<TransactionModalProps> = ({
   isOpen,
@@ -104,6 +46,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   currentRates,
   pockets,
   transactions = [],
+  investmentAccountingReady = false,
 }) => {
   const [type, setType] = useState<TransactionType>(defaultType);
   const [date, setDate] = useState<string>('');
@@ -127,6 +70,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
 
   // Dynamic labels based on active pocket
   const isIdr = (activePocket?.currencyCode || '').toUpperCase() === 'IDR';
+  const isInvestment = activePocket && isRupiahInvestment(activePocket);
   const isGold =
     activePocket?.instrumentType === 'LOGAM_MULIA' ||
     (activePocket?.currencyCode || '').toUpperCase() === 'XAU';
@@ -178,7 +122,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setNotes(editTransaction.notes || '');
       setErrorMsg('');
     } else {
-      const today = new Date().toISOString().split('T')[0];
+      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
       setDate(today);
       setType(defaultType || 'CREDIT');
       setDescription('');
@@ -203,6 +147,9 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   // Hitung saldo terkini kantong aktif untuk proteksi overdraft
   const currentAvailableBalance = useMemo(() => {
     if (!activePocket) return 0;
+    if (isInvestment) {
+      return redemptionPreview(activePocket, transactions.filter(t => t.id !== editTransaction?.id), 0).marketValueIdr;
+    }
     return transactions
       .filter(
         (t) =>
@@ -227,6 +174,13 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     : cleanNumericInput(exchangeRateStr);
   const cleanTotalIdr = Math.round(cleanAmount * cleanRate);
   const previewCostIdr = type === 'CREDIT' ? cleanTotalIdr : -cleanTotalIdr;
+  const redemption = isInvestment && type === 'DEBET'
+    ? redemptionPreview(activePocket, transactions.filter(t => t.id !== editTransaction?.id), cleanAmount) : null;
+  const investmentError = redemption && !investmentAccountingReady
+    ? 'Pencairan investasi menunggu pembaruan layanan pencatatan. Hubungi pengelola.'
+    : redemption?.ambiguousLegacySnapshot
+    ? 'Perbarui nilai investasi sesuai aplikasi terlebih dahulu agar saldo acuan pencairan jelas.'
+    : '';
 
   // Validasi ketat overdraft (blokir penarikan jika nominal > saldo)
   const isOverdraft = type === 'DEBET' && cleanAmount > currentAvailableBalance;
@@ -240,11 +194,21 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     Boolean(description.trim()) &&
     cleanAmount > 0 &&
     (isIdr || cleanRate > 0) &&
-    !isOverdraft;
+    !isOverdraft && !investmentError;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
+    if (investmentError) {
+      setErrorMsg(investmentError);
+      return;
+    }
+    if (isInvestment) {
+      const mutationError = investmentMutationError(activePocket, transactions, {
+        ...editTransaction, id: editTransaction?.id || '', date, type,
+      } as LedgerTransaction);
+      if (mutationError) { setErrorMsg(mutationError); return; }
+    }
 
     if (!date) {
       setErrorMsg('Tanggal transaksi wajib diisi.');
@@ -305,10 +269,10 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       totalIdr: finalCostIdr,
       note: description.trim(),
       notes: notes.trim() || undefined,
+      costBasisReleasedIdr: redemption?.costBasisReleasedIdr,
     };
 
     onSave(tx);
-    onClose();
   };
 
   if (!isOpen) return null;
@@ -373,7 +337,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           </div>
 
           <div className="shrink-0 text-right">
-            <div className="text-[10px] text-slate-400 font-medium">Saldo Buku Besar:</div>
+            <div className="text-[10px] text-slate-400 font-medium">{isInvestment ? 'Nilai Investasi Tercatat:' : 'Saldo Buku Besar:'}</div>
             <div className="text-xs font-bold font-sans tabular-nums text-slate-800">
               {currentAvailableBalance.toLocaleString('id-ID')} {activePocket?.currencyCode}
             </div>
@@ -381,6 +345,18 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-4">
+          {isInvestment && (
+            <p className="text-xs text-slate-600">
+              Masukkan nominal rupiah sesuai aplikasi investasi. Nilai investasi mengikuti pembaruan terakhir dan mutasi setelahnya; konfirmasikan hasil pencairan di aplikasi.
+            </p>
+          )}
+          {investmentError && <p role="alert" className="text-xs text-rose-600">{investmentError}</p>}
+          {redemption && cleanAmount > 0 && !isOverdraft && !investmentError && (
+            <div className="rounded-xl bg-teal-50 p-3 text-xs text-teal-800">
+              <p>Modal yang dilepas: {formatIdr(redemption.costBasisReleasedIdr)}</p>
+              <p>Hasil investasi terealisasi: {formatIdr(redemption.realizedPnlIdr)}</p>
+            </div>
+          )}
           {/* 1. Jenis Mutasi (Masuk vs Keluar) */}
           <div>
             <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">

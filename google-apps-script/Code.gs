@@ -88,7 +88,8 @@ function handleGetLedgerData(params) {
       success: true,
       userEmail: userEmail,
       pockets: pockets,
-      transactions: transactions
+      transactions: transactions,
+      investmentAccountingVersion: 1
     });
   } catch (err) {
     return createJsonResponse({
@@ -163,6 +164,8 @@ function readTenantLedgerRows(sheet, userEmail) {
         if (normalizedHeader === 'exchangerate') record.exchangeRate = value;
         if (normalizedHeader === 'totalidr') record.totalIdr = value;
         if (normalizedHeader === 'costidr') record.costIdr = value;
+        if (normalizedHeader === 'costbasisreleasedidr') record.costBasisReleasedIdr = value;
+        if (normalizedHeader === 'valuationcashflowidr') record.valuationCashflowIdr = value;
         if (normalizedHeader === 'type') record.type = value;
         if (normalizedHeader === 'date') record.date = value;
         if (normalizedHeader === 'note') record.note = value;
@@ -295,6 +298,14 @@ function handleSyncLedgerPockets(payload) {
     if (!pocketSheet) pocketSheet = ss.insertSheet('LEDGER_POCKETS');
 
     ensureLedgerPocketHeaders(pocketSheet);
+    const currentPockets = readTenantLedgerRows(pocketSheet, userEmail);
+    const tenantTransactions = readTenantLedgerRows(ss.getSheetByName('LEDGER_TRANSACTIONS'), userEmail);
+    pockets.forEach(function(pocket) {
+      const original = currentPockets.find(function(p) { return String(p.id) === String(pocket.id || pocket.pocketId); });
+      if (original && isMoneyInvestment(original) && !isMoneyInvestment(pocket) && tenantTransactions.some(function(t) {
+        return String(t.pocketId) === String(original.id) && hasReleasedCost(t);
+      })) throw new Error('Perubahan jenis kantong dengan pencairan tercatat memerlukan rekonsiliasi.');
+    });
     const result = upsertTenantPockets(pocketSheet, userEmail, pockets);
     const restored = restoreOrphanPocketMasters(
       pocketSheet,
@@ -343,11 +354,81 @@ function handleRepairLedgerOrphanPockets(payload) {
   }
 }
 
+function isMoneyInvestment(pocket) {
+  return String(pocket.currencyCode || pocket.currency || '').toUpperCase() === 'IDR' &&
+    ['REKSADANA', 'SINKING_FUND', 'ASET_FISIK'].indexOf(normalizePocketInstrumentType(pocket)) >= 0;
+}
+
+function hasReleasedCost(tx) {
+  return tx.costBasisReleasedIdr !== undefined && tx.costBasisReleasedIdr !== null &&
+    tx.costBasisReleasedIdr !== '' && isFinite(Number(tx.costBasisReleasedIdr));
+}
+
+// Kept in parity with src/utils/investmentAccounting.ts by offline regression tests.
+function investmentServerPosition(pocket, transactions) {
+  const rows = transactions.filter(function(t) {
+    return String(t.pocketId || '').trim() === String(pocket.id || pocket.pocketId).trim() ||
+      (!t.pocketId && t.currency === (pocket.currencyCode || pocket.currency));
+  });
+  const amount = function(t) { return Number(t.nativeAmount !== undefined ? t.nativeAmount : t.amount); };
+  const credit = function(t) { return t.type === 'CREDIT' || t.type === 'IN'; };
+  const cashflowOf = function(items) { return items.reduce(function(sum, t) { return sum + (credit(t) ? 1 : -1) * amount(t); }, 0); };
+  const cashflow = cashflowOf(rows);
+  const rawValue = pocket.marketValueNative !== undefined && pocket.marketValueNative !== ''
+    ? pocket.marketValueNative : pocket.marketValue;
+  const hasValuation = rawValue !== undefined && rawValue !== null && rawValue !== '' && isFinite(Number(rawValue)) && Number(rawValue) >= 0;
+  const date = pocket.lastPriceUpdatedAt ? Utilities.formatDate(new Date(pocket.lastPriceUpdatedAt), 'Asia/Jakarta', 'yyyy-MM-dd') : '';
+  const anchored = pocket.valuationCashflowIdr !== undefined && pocket.valuationCashflowIdr !== '' && isFinite(Number(pocket.valuationCashflowIdr));
+  const ambiguous = hasValuation && !anchored && (!date || rows.some(function(t) { return String(t.date) === date; }));
+  const baseline = anchored ? Number(pocket.valuationCashflowIdr) : cashflowOf(rows.filter(function(t) { return String(t.date) <= date; }));
+  let cost = 0;
+  let balance = 0;
+  rows.slice().sort(function(a, b) { return String(a.date).localeCompare(String(b.date)) || String(a.id).localeCompare(String(b.id)); }).forEach(function(t) {
+    const value = amount(t);
+    if (credit(t)) {
+      cost += Math.abs(Number(t.costIdr !== undefined && t.costIdr !== '' ? t.costIdr : t.totalIdr !== undefined ? t.totalIdr : value));
+      balance += value;
+    } else {
+      const released = hasReleasedCost(t) ? Number(t.costBasisReleasedIdr) : balance > 0 ? Math.min(cost, value * cost / balance) : 0;
+      cost = Math.max(0, cost - released);
+      balance = Math.max(0, balance - value);
+    }
+  });
+  return { cashflow: cashflow, marketValueIdr: hasValuation ? Number(rawValue) + cashflow - baseline : cashflow, costBasisIdr: cost, ambiguousLegacySnapshot: ambiguous };
+}
+
+function validateInvestmentTransaction(pocket, history, tx) {
+  if (!isMoneyInvestment(pocket)) { delete tx.costBasisReleasedIdr; return ''; }
+  const rows = history.filter(function(t) { return String(t.pocketId) === String(tx.pocketId); });
+  const existing = rows.find(function(t) { return String(t.id) === String(tx.id); });
+  if (existing && rows.some(hasReleasedCost)) {
+    // A lost response may trigger an identical retry. Accept it without treating it as an edit.
+    const unchanged = ['date', 'currency', 'type', 'description', 'location', 'poscategory', 'nativeamount', 'exchangerate', 'costbasisreleasedidr'].every(function(key) {
+      return String(canonicalTransactionValue(existing, key, '')) === String(canonicalTransactionValue(tx, key, ''));
+    });
+    return unchanged ? '' : 'Koreksi riwayat pencairan memerlukan rekonsiliasi.';
+  }
+  if (rows.some(function(t) { return String(t.id) !== String(tx.id) && String(t.date) > String(tx.date); })) return 'Masukkan mutasi investasi secara berurutan.';
+  const debit = tx.type === 'DEBET' || tx.type === 'OUT';
+  const amount = Number(tx.nativeAmount !== undefined ? tx.nativeAmount : tx.amount);
+  if (!isFinite(amount) || amount <= 0) return 'Nominal investasi tidak valid.';
+  if (!debit) { delete tx.costBasisReleasedIdr; return ''; }
+  const valuationDate = pocket.lastPriceUpdatedAt ? Utilities.formatDate(new Date(pocket.lastPriceUpdatedAt), 'Asia/Jakarta', 'yyyy-MM-dd') : '';
+  if (valuationDate && String(tx.date) < valuationDate) return 'Tanggal pencairan mendahului nilai investasi acuan.';
+  const position = investmentServerPosition(pocket, rows.filter(function(t) { return String(t.id) !== String(tx.id); }));
+  if (position.ambiguousLegacySnapshot) return 'Perbarui nilai investasi terlebih dahulu.';
+  if (position.marketValueIdr <= 0 || amount > position.marketValueIdr + 0.000001) return 'Penarikan melebihi nilai investasi tercatat.';
+  const released = position.costBasisIdr * Math.min(1, amount / position.marketValueIdr);
+  if (!hasReleasedCost(tx) || Number(tx.costBasisReleasedIdr) < 0 || Math.abs(Number(tx.costBasisReleasedIdr) - released) > 0.01) return 'Modal pencairan berubah. Muat ulang sebelum menyimpan.';
+  tx.costBasisReleasedIdr = released;
+  return '';
+}
+
 function ensureLedgerTransactionHeaders(sheet) {
   const required = [
     'id', 'userEmail', 'pocketId', 'date', 'currency', 'posCategory',
     'description', 'location', 'type', 'amount', 'rate', 'totalIdr',
-    'nativeAmount', 'exchangeRate', 'costIdr', 'note', 'notes', 'updatedAt'
+    'nativeAmount', 'exchangeRate', 'costIdr', 'note', 'notes', 'updatedAt', 'costBasisReleasedIdr'
   ];
   if (sheet.getLastRow() < 1 || sheet.getLastColumn() < 1) {
     sheet.getRange(1, 1, 1, required.length).setValues([required]);
@@ -383,6 +464,7 @@ function canonicalTransactionValue(transaction, normalizedHeader, userEmail) {
   if (normalizedHeader === 'amount' || normalizedHeader === 'nativeamount') return amount;
   if (normalizedHeader === 'rate' || normalizedHeader === 'exchangerate') return rate;
   if (normalizedHeader === 'totalidr' || normalizedHeader === 'costidr') return signedTotal;
+  if (normalizedHeader === 'costbasisreleasedidr') return transaction.costBasisReleasedIdr === undefined ? '' : Number(transaction.costBasisReleasedIdr);
   if (normalizedHeader === 'note' || normalizedHeader === 'notes') return description;
   if (normalizedHeader === 'updatedat') return sanitizeInput(transaction.updatedAt || new Date().toISOString());
   return undefined;
@@ -402,12 +484,15 @@ function handleSaveLedgerTransaction(payload) {
   try {
     const ss = getSpreadsheet();
     const pocketSheet = ss.getSheetByName('LEDGER_POCKETS') || ss.getSheetByName('POCKETS');
-    const pocketExists = readTenantLedgerRows(pocketSheet, userEmail).some(function(pocket) {
+    const activePocket = readTenantLedgerRows(pocketSheet, userEmail).find(function(pocket) {
       return String(pocket.id || pocket.pocketId || '').trim() === pocketId;
     });
-    if (!pocketExists) {
+    if (!activePocket) {
       return createJsonResponse({ status: 'error', success: false, message: 'Kantong transaksi tidak ditemukan untuk tenant aktif.' });
     }
+    const history = readTenantLedgerRows(ss.getSheetByName('LEDGER_TRANSACTIONS'), userEmail);
+    const accountingError = validateInvestmentTransaction(activePocket, history, transaction);
+    if (accountingError) return createJsonResponse({ status: 'error', success: false, message: accountingError });
 
     let sheet = ss.getSheetByName('LEDGER_TRANSACTIONS');
     if (!sheet) sheet = ss.insertSheet('LEDGER_TRANSACTIONS');
@@ -451,6 +536,13 @@ function handleDeleteLedgerTransaction(payload) {
   try {
     const sheet = getSpreadsheet().getSheetByName('LEDGER_TRANSACTIONS');
     if (!sheet || sheet.getLastRow() < 2) return createJsonResponse({ status: 'success', success: true, deletedRows: 0 });
+    const tenantRows = readTenantLedgerRows(sheet, userEmail);
+    const target = tenantRows.find(function(tx) { return String(tx.id) === transactionId; });
+    const pocketSheet = getSpreadsheet().getSheetByName('LEDGER_POCKETS');
+    const targetPocket = target && readTenantLedgerRows(pocketSheet, userEmail).find(function(p) { return String(p.id) === String(target.pocketId); });
+    if (targetPocket && isMoneyInvestment(targetPocket) && tenantRows.some(function(tx) {
+      return String(tx.pocketId) === String(target.pocketId) && hasReleasedCost(tx);
+    })) return createJsonResponse({ status: 'error', success: false, message: 'Penghapusan riwayat pencairan memerlukan rekonsiliasi.' });
     const values = sheet.getDataRange().getValues();
     const headers = values[0].map(normalizeLedgerHeader);
     const emailIndex = headers.indexOf('useremail') >= 0 ? headers.indexOf('useremail') : headers.indexOf('email');
@@ -481,7 +573,7 @@ function ensureLedgerPocketHeaders(sheet) {
   const required = [
     'id', 'userEmail', 'name', 'instrumentType', 'currency', 'custodian',
     'category', 'sortOrder', 'marketValue', 'marketValueNative', 'marketValueCurrency',
-    'manualMarketRate', 'lastPriceUpdatedAt', 'updatedAt'
+    'manualMarketRate', 'lastPriceUpdatedAt', 'updatedAt', 'valuationCashflowIdr'
   ];
   if (sheet.getLastRow() < 1 || sheet.getLastColumn() < 1) {
     sheet.getRange(1, 1, 1, required.length).setValues([required]);
@@ -513,6 +605,7 @@ function canonicalPocketValue(pocket, normalizedHeader, userEmail) {
   if (normalizedHeader === 'custodian' || normalizedHeader === 'defaultcustodian') return sanitizeInput(pocket.custodian || pocket.defaultCustodian || '');
   if (normalizedHeader === 'category') return normalizePocketCategory(pocket);
   if (normalizedHeader === 'sortorder') return Number(pocket.sortOrder || 0);
+  if (normalizedHeader === 'valuationcashflowidr') return pocket.valuationCashflowIdr === undefined ? undefined : Number(pocket.valuationCashflowIdr);
   if (normalizedHeader === 'marketvalue' || normalizedHeader === 'marketvalueidr') {
     if (!Object.prototype.hasOwnProperty.call(pocket, 'marketValue') && !Object.prototype.hasOwnProperty.call(pocket, 'marketValueIdr')) return undefined;
     const marketValue = Number(pocket.marketValue !== undefined ? pocket.marketValue : pocket.marketValueIdr);
@@ -734,6 +827,7 @@ function handleUpdateLedgerPocketMarketRate(payload) {
     if (!sheet || sheet.getLastRow() < 2) {
       return createJsonResponse({ status: 'error', success: false, message: 'Sheet LEDGER_POCKETS tidak ditemukan atau kosong.' });
     }
+    ensureLedgerPocketHeaders(sheet);
 
     let lastColumn = sheet.getLastColumn();
     let headers = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
@@ -783,6 +877,14 @@ function handleUpdateLedgerPocketMarketRate(payload) {
       const rowPocketId = String(values[index][idIndex] || '').trim();
       if (rowEmail === userEmail && rowPocketId === pocketId) {
         const sheetRow = index + 2;
+        const activePocket = readTenantLedgerRows(sheet, userEmail).find(function(p) { return String(p.id) === pocketId; });
+        if (activePocket && isMoneyInvestment(activePocket)) {
+          const cashflow = investmentServerPosition(activePocket, readTenantLedgerRows(getSpreadsheet().getSheetByName('LEDGER_TRANSACTIONS'), userEmail)).cashflow;
+          if (payload.valuationCashflowIdr === undefined || Math.abs(Number(payload.valuationCashflowIdr) - cashflow) > 0.000001) {
+            return createJsonResponse({ status: 'error', success: false, message: 'Mutasi berubah. Muat ulang sebelum memperbarui nilai investasi.' });
+          }
+          sheet.getRange(sheetRow, normalized.indexOf('valuationcashflowidr') + 1).setValue(cashflow);
+        }
         sheet.getRange(sheetRow, rateIndex + 1).setValue(manualMarketRate);
         if (hasMarketValue) sheet.getRange(sheetRow, marketValueIndex + 1).setValue(marketValue);
         if (hasNativeMarketValue && isFinite(marketValueNative) && marketValueNative > 0) {

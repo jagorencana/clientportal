@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { CurrencyPocketSummary, LedgerTransaction } from '../../types/ledger';
 import { EnrichedTransaction } from '../../utils/calculator';
+import { isRupiahInvestment } from '../../utils/investmentAccounting';
+import { formatIdNumber, parseIdNumber } from '../../utils/numberInput';
 import { AssetAvatar } from './AssetAvatar';
 import {
   formatIdr,
@@ -56,6 +58,7 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
 }) => {
   const isPnlPositive = pocket.unrealizedPnlIdr >= 0;
   const isIdr = (pocket.currency || '').toUpperCase() === 'IDR';
+  const isInvestment = isRupiahInvestment(pocket);
   const custodianDisplay =
     pocket.defaultCustodian || (isIdr ? 'BCA / Jago / Cash' : 'CIMB Niaga');
   const supportsManualValuation =
@@ -74,21 +77,22 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
     if (!isMarketValueModalOpen) return;
     setMarketValueInput(
       pocket.manualMarketValueNative !== undefined
-        ? String(pocket.manualMarketValueNative)
+        ? formatIdNumber(pocket.manualMarketValueNative, 0, 2)
         : pocket.manualMarketValue !== undefined || pocket.manualMarketRate
-        ? String(isForeignMarketValue
+        ? formatIdNumber(isForeignMarketValue
             ? Number((pocket.marketValueIdr / Math.max(pocket.currentMarketRate, 1)).toFixed(2))
-            : Math.round(pocket.marketValueIdr))
+            : Math.round(pocket.marketValueIdr), 0, 2)
         : ''
     );
   }, [isMarketValueModalOpen, pocket.manualMarketRate, pocket.manualMarketValue, pocket.manualMarketValueNative, pocket.marketValueIdr, pocket.currentMarketRate, isForeignMarketValue]);
 
-  const parsedMarketInput = Number(marketValueInput) || 0;
+  const parsedMarketInput = parseIdNumber(marketValueInput);
   const previewMarketValue = isForeignMarketValue
     ? parsedMarketInput * pocket.currentMarketRate
     : parsedMarketInput;
-  const previewMarketRate = pocket.balanceNative > 0
-    ? previewMarketValue / pocket.balanceNative
+  const valuationDenominator = isInvestment ? pocket.totalCostBasisIdr : pocket.balanceNative;
+  const previewMarketRate = valuationDenominator > 0
+    ? previewMarketValue / valuationDenominator
     : 0;
   const previewPnl = previewMarketValue - pocket.totalCostBasisIdr;
   const previewPnlPercent = pocket.totalCostBasisIdr > 0
@@ -114,7 +118,7 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
   }, [pocket.lastPriceUpdatedAt]);
 
   const saveMarketValue = async () => {
-    if (previewMarketRate <= 0 || pocket.balanceNative <= 0) return;
+    if (previewMarketRate <= 0 || valuationDenominator <= 0) return;
     setIsSavingMarketValue(true);
     const saved = await onUpdateMarketRate(
       pocket.pocketId,
@@ -204,7 +208,7 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 mt-1">
-                  Buku besar mutasi aset &middot; Metode Moving Average Cost &middot; Real-time valuation
+                  {isInvestment ? 'Pencatatan nominal rupiah · Nilai investasi sesuai pembaruan terakhir' : 'Buku besar mutasi aset · Metode Moving Average Cost · Real-time valuation'}
                 </p>
               </div>
             </div>
@@ -214,11 +218,11 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
           <div className="py-6 flex flex-col md:flex-row md:items-end justify-between gap-5">
             <div>
               <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                Total Saldo Tersedia
+                {isInvestment ? 'Nilai Investasi Tercatat' : 'Total Saldo Tersedia'}
               </div>
               <div className="text-2xl md:text-3xl font-extrabold text-slate-900 font-sans tabular-nums tracking-tight mt-1">
                 {formatPocketBalance(
-                  pocket.balanceNative,
+                  isInvestment ? pocket.availableBalanceNative ?? pocket.marketValueIdr : pocket.balanceNative,
                   pocket.currency,
                   pocket.instrumentType,
                   pocket.symbol
@@ -292,13 +296,13 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
             <div className="bg-white/80 backdrop-blur-xs p-3.5 rounded-xl border border-slate-200/80">
               <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
                 <Coins className="w-3.5 h-3.5 text-slate-500" />
-                <span>Kurs Rata-Rata</span>
+                <span>{isInvestment ? 'Hasil Terealisasi' : 'Kurs Rata-Rata'}</span>
               </div>
               <div className="text-lg sm:text-xl font-black text-slate-900 font-sans tabular-nums mt-1">
-                {isIdr && !supportsManualValuation ? '1.0' : `Rp ${formatRate(pocket.averageBuyRate, pocket.currency)}`}
+                {isInvestment ? formatIdr(pocket.realizedPnlIdr || 0) : isIdr && !supportsManualValuation ? '1.0' : `Rp ${formatRate(pocket.averageBuyRate, pocket.currency)}`}
               </div>
               <div className="text-[10px] text-slate-400 mt-0.5">
-                Weighted average cost
+                {isInvestment ? 'Dari pencairan dengan modal tercatat' : 'Weighted average cost'}
               </div>
             </div>
 
@@ -395,9 +399,7 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
                   inputMode="numeric"
                   value={marketValueInput}
                   onChange={(event) => {
-                    const sanitized = event.target.value.replace(/[^0-9.]/g, '');
-                    const [whole, ...decimals] = sanitized.split('.');
-                    setMarketValueInput(decimals.length ? `${whole}.${decimals.join('').slice(0, 2)}` : whole);
+                    setMarketValueInput(event.target.value.replace(/[^0-9.,]/g, ''));
                   }}
                   placeholder="0"
                   className="min-w-0 flex-1 border-0 bg-transparent px-2 py-3 text-right text-base font-bold tabular-nums text-slate-900 outline-none"
@@ -417,7 +419,7 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
             <button
               type="button"
               onClick={saveMarketValue}
-              disabled={previewMarketRate <= 0 || pocket.balanceNative <= 0 || isSavingMarketValue}
+              disabled={previewMarketRate <= 0 || valuationDenominator <= 0 || isSavingMarketValue}
               className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isSavingMarketValue ? <Loader2 className="h-4 w-4 animate-spin" /> : <TrendingUp className="h-4 w-4" />}

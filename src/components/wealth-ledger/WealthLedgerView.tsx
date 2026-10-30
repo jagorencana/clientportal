@@ -41,6 +41,7 @@ import {
   setCurrentUserEmail,
 } from '../../services/ledgerApiService';
 import { exportLedgerTransactionsToCsv } from '../../services/reportService';
+import { investmentMutationError, isRupiahInvestment, netCashflow, pocketTransactions, redemptionPreview } from '../../utils/investmentAccounting';
 import { GlobalMetrics } from './GlobalMetrics';
 import { CurrencyWatchlistModal } from './CurrencyWatchlistModal';
 import { PocketGrid } from './PocketGrid';
@@ -110,6 +111,7 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
 
   // 3. Modal State
   const [isTxModalOpen, setIsTxModalOpen] = useState(false);
+  const [investmentAccountingReady, setInvestmentAccountingReady] = useState(false);
   const [editingTx, setEditingTx] = useState<LedgerTransaction | null>(null);
   const [txModalDefaults, setTxModalDefaults] = useState<{
     pocketId?: string;
@@ -301,6 +303,7 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
       }
 
       const usingCache = data.source === 'cache';
+      setInvestmentAccountingReady(!usingCache && data.investmentAccountingVersion === 1);
       setIsUsingLedgerCache(usingCache);
 
       const remotePockets = Array.isArray(data.pockets) ? data.pockets : [];
@@ -383,6 +386,7 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
     }
 
     const cached = loadCachedLedgerData(effectiveEmail);
+    setInvestmentAccountingReady(false);
     const cachedPockets = Array.isArray(cached?.pockets) ? cached.pockets : [];
     const cachedPocketIds = new Set(
       cachedPockets.map((pocket) => String(pocket.id || '').trim()).filter(Boolean)
@@ -542,7 +546,8 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
         );
 
       const isMatching = Math.abs(rawTxBal - cp.balanceNative) < 0.0001;
-      const isNonNegative = rawTxBal >= -0.0001;
+      // Net cashflow may be negative after redeeming investment gains.
+      const isNonNegative = isRupiahInvestment(cp) ? cp.marketValueIdr >= -0.0001 : rawTxBal >= -0.0001;
 
       if (!isNonNegative) {
         discrepantPockets.push(cp.name);
@@ -642,7 +647,25 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
   };
 
   const handleSaveTransaction = async (tx: LedgerTransaction) => {
-    if (tx.type === 'DEBET') {
+    const pocket = pocketsRef.current.find(p => p.id === tx.pocketId);
+    const isInvestment = pocket && isRupiahInvestment(pocket);
+    if (isInvestment) {
+      const history = transactionsRef.current;
+      const mutationError = investmentMutationError(pocket, history, tx);
+      if (mutationError) { showToast(mutationError); return; }
+      if (tx.type === 'DEBET') {
+        const preview = redemptionPreview(pocket, history.filter(t => t.id !== tx.id), tx.nativeAmount);
+        if (!investmentAccountingReady || preview.ambiguousLegacySnapshot) {
+          showToast('Perbarui layanan pencatatan dan nilai investasi sebelum mencairkan dana.');
+          return;
+        }
+        if (tx.nativeAmount > preview.marketValueIdr + 0.000001) {
+          showToast('Penarikan melebihi nilai investasi tercatat.');
+          return;
+        }
+        tx = { ...tx, costBasisReleasedIdr: preview.costBasisReleasedIdr };
+      }
+    } else if (tx.type === 'DEBET') {
       const currentBalance = transactions
         .filter(
           (t) =>
@@ -662,6 +685,9 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
         return;
       }
     }
+
+    setIsTxModalOpen(false);
+    setEditingTx(null);
 
     const existingIndex = transactions.findIndex((t) => t.id === tx.id);
     let updated: LedgerTransaction[];
@@ -702,6 +728,11 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
 
   const handleDeleteTransaction = async (id: string) => {
     const tx = transactions.find((t) => t.id === id);
+    const pocket = pockets.find(p => p.id === tx?.pocketId);
+    if (pocket && isRupiahInvestment(pocket) && pocketTransactions(pocket, transactions).some(t => t.costBasisReleasedIdr !== undefined)) {
+      showToast('Penghapusan riwayat investasi dengan pencairan tercatat memerlukan rekonsiliasi.');
+      return;
+    }
     const updated = transactions.filter((t) => t.id !== id);
     const mutationTenant = effectiveEmail;
     ledgerMutationVersionRef.current += 1;
@@ -745,6 +776,8 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
     }
 
     const previousPocket = pockets.find((pocket) => pocket.id === normalizedPocketId);
+    const valuationCashflowIdr = previousPocket && isRupiahInvestment(previousPocket)
+      ? netCashflow(pocketTransactions(previousPocket, transactionsRef.current)) : undefined;
     const mutationTenant = effectiveEmail;
     const lastPriceUpdatedAt = new Date().toISOString();
     const updatedPockets = pockets.map((pocket) =>
@@ -755,6 +788,7 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
             marketValue: totalMarketValue,
             marketValueNative,
             marketValueCurrency,
+            valuationCashflowIdr,
             lastPriceUpdatedAt,
             updatedAt: lastPriceUpdatedAt,
           }
@@ -772,7 +806,8 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
         mutationTenant,
         totalMarketValue,
         marketValueNative,
-        marketValueCurrency
+        marketValueCurrency,
+        valuationCashflowIdr
       ));
       if (activeTenantEmailRef.current !== mutationTenant) return false;
       if (!isLedgerMutationSuccess(result)) {
@@ -794,6 +829,13 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
 
   // Pocket Management Handlers
   const handleSavePocket = async (pocketToSave: AssetPocket) => {
+    const original = pocketsRef.current.find(p => p.id === pocketToSave.id);
+    if (original && isRupiahInvestment(original) &&
+      pocketTransactions(original, transactionsRef.current).some(t => t.costBasisReleasedIdr !== undefined) &&
+      (!isRupiahInvestment(pocketToSave) || original.currencyCode !== pocketToSave.currencyCode)) {
+      showToast('Jenis pencatatan kantong dengan pencairan tercatat tidak dapat diubah tanpa rekonsiliasi.');
+      return;
+    }
     const existingIndex = pockets.findIndex((p) => p.id === pocketToSave.id);
     let updated: AssetPocket[];
 
@@ -1278,6 +1320,7 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
         pockets={pockets}
         transactions={transactions}
         isScopedToPocket={isScopedPocketTx}
+        investmentAccountingReady={investmentAccountingReady}
       />
 
       {/* B. Market Valuation Modal */}

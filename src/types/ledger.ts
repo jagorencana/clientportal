@@ -27,6 +27,7 @@ export interface AssetPocket {
   marketValue?: number;        // Total nilai pasar manual; menjadi override hingga user memperbaruinya
   marketValueNative?: number;  // Total nilai pasar dalam denominasi asli (mis. USD)
   marketValueCurrency?: string;// Mata uang marketValueNative
+  valuationCashflowIdr?: number; // Net cash movements already included in the manual valuation
   lastPriceUpdatedAt?: string; // ISO timestamp pembaruan harga manual terakhir
   isDefault?: boolean;
   sortOrder?: number;          // Google Sheets sortOrder
@@ -68,6 +69,7 @@ export interface LedgerTransaction {
   totalIdr?: number;         // Alias for costIdr
   note?: string;             // Alias for notes / description
   notes?: string;
+  costBasisReleasedIdr?: number; // IDR investment redemption: allocated acquisition cost
 }
 
 // User-friendly interface alias
@@ -97,6 +99,8 @@ export interface CurrencyPocketSummary {
   marketValueIdr: number;      // balanceNative * currentMarketRate
   unrealizedPnlIdr: number;    // marketValueIdr - totalCostBasisIdr
   unrealizedPnlPercent: number;// (unrealizedPnlIdr / totalCostBasisIdr) * 100
+  availableBalanceNative?: number; // IDR investments: valuation adjusted for subsequent cash movements
+  realizedPnlIdr?: number;
 }
 
 export interface GlobalWealthSummary {
