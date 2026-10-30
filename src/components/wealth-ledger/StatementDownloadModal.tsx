@@ -592,7 +592,7 @@ export const StatementDownloadModal: React.FC<StatementDownloadModalProps> = ({
                 {/* Saldo Awal */}
                 <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200">
                   <div className="text-[9.5px] font-bold text-slate-500 uppercase tracking-wider">
-                    Saldo Awal Periode
+                    Saldo Mutasi Awal Periode
                   </div>
                   <div className="text-xs sm:text-sm font-bold text-slate-900 font-sans tabular-nums mt-0.5">
                     {formatIdr(initialBalance.idrBal)}
@@ -642,7 +642,7 @@ export const StatementDownloadModal: React.FC<StatementDownloadModalProps> = ({
                 {/* Saldo Akhir */}
                 <div className="bg-slate-900 text-white p-2.5 rounded-lg border border-slate-800 shadow-2xs">
                   <div className="text-[9.5px] font-bold text-slate-300 uppercase tracking-wider">
-                    Saldo Akhir Periode
+                    Saldo Mutasi Akhir Periode
                   </div>
                   <div className="text-xs sm:text-sm font-bold font-sans tabular-nums mt-0.5">
                     {formatIdr(finalBalance.idrBal)}
@@ -689,7 +689,7 @@ export const StatementDownloadModal: React.FC<StatementDownloadModalProps> = ({
                       </th>
                       {/* 7. Saldo Akhir Berjalan (lebar ~120px) */}
                       <th className="py-2 px-2 whitespace-nowrap text-right" style={{ width: '120px' }}>
-                        Saldo Akhir
+                        Saldo Mutasi
                       </th>
                     </tr>
                   </thead>

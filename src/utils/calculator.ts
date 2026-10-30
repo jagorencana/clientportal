@@ -5,6 +5,7 @@ import {
   GlobalWealthSummary,
   LedgerTransaction,
 } from '../types/ledger';
+import { investmentPosition, isRupiahInvestment } from './investmentAccounting';
 
 export interface EnrichedTransaction extends LedgerTransaction {
   isCredit: boolean;
@@ -75,7 +76,8 @@ export function computeCurrencyPocketSummary(
   });
 
   const balanceNative = totalCreditNative - totalDebetNative;
-  const totalCostBasisIdr = balanceNative > 0 ? runningCost : 0;
+  const investment = isRupiahInvestment(pocket) ? investmentPosition(pocket, allTransactions) : null;
+  const totalCostBasisIdr = investment ? investment.costBasisIdr : balanceNative > 0 ? runningCost : 0;
   const averageBuyRate =
     balanceNative > 0 ? totalCostBasisIdr / balanceNative : (code === 'IDR' ? 1 : currentMarketRate);
 
@@ -104,7 +106,7 @@ export function computeCurrencyPocketSummary(
   const nativeMarketValueIdr = storedMarketCurrency === 'IDR'
     ? storedNativeMarketValue
     : storedNativeMarketValue * currentMarketRate;
-  const marketValueIdr = supportsManualValuation && hasStoredNativeMarketValue
+  const marketValueIdr = investment ? investment.marketValueIdr : supportsManualValuation && hasStoredNativeMarketValue
     ? nativeMarketValueIdr
     : supportsManualValuation && hasStoredMarketValue
       ? storedMarketValue
@@ -128,6 +130,8 @@ export function computeCurrencyPocketSummary(
     totalCreditNative,
     totalDebetNative,
     balanceNative,
+    availableBalanceNative: investment ? Math.max(0, investment.marketValueIdr) : balanceNative,
+    realizedPnlIdr: investment?.realizedPnlIdr,
     totalCostBasisIdr,
     averageBuyRate,
     currentMarketRate: effectiveSpotRate,

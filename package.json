@@ -13,7 +13,8 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test:regression": "node scripts/check-auth-regression.mjs"
+    "test:regression": "node scripts/check-auth-regression.mjs && npm run test:ledger",
+    "test:ledger": "tsx --test scripts/ledger-accounting.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

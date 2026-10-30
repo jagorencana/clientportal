@@ -1,5 +1,6 @@
 import React from 'react';
 import { CurrencyPocketSummary } from '../../types/ledger';
+import { isRupiahInvestment } from '../../utils/investmentAccounting';
 import { AssetAvatar } from './AssetAvatar';
 import {
   formatRate,
@@ -216,14 +217,14 @@ export const PocketCard: React.FC<PocketCardProps> = ({
       {/* ZONA 2: SALDO TERSEDIA & EKUIVALEN RUPIAH */}
       <div className="my-auto py-1 border-y border-slate-50 flex flex-col justify-center">
         <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">
-          Saldo Tersedia
+          {isRupiahInvestment(pocket) ? 'Nilai Investasi Tercatat' : 'Saldo Tersedia'}
         </div>
         <div
           className="text-lg sm:text-xl font-bold tracking-tight text-slate-900 truncate font-sans tabular-nums leading-tight"
-          title={String(pocket.balanceNative)}
+          title={String(pocket.availableBalanceNative ?? pocket.balanceNative)}
         >
           {formatPocketBalance(
-            pocket.balanceNative,
+            pocket.availableBalanceNative ?? pocket.balanceNative,
             pocket.currency,
             pocket.instrumentType,
             pocket.symbol
@@ -246,9 +247,9 @@ export const PocketCard: React.FC<PocketCardProps> = ({
       <div className="mt-auto pt-1">
         {pocket.currency !== 'IDR' || supportsManualValuation ? (
           <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-2.5 py-1.5 bg-slate-50 rounded-lg border border-slate-100 text-[10px] font-sans text-slate-500 tabular-nums">
-            <span className="whitespace-nowrap">Avg: Rp {formatRate(pocket.averageBuyRate, pocket.currency)}</span>
+            <span className="whitespace-nowrap">{isRupiahInvestment(pocket) ? `Modal: Rp ${Math.round(pocket.totalCostBasisIdr).toLocaleString('id-ID')}` : `Avg: Rp ${formatRate(pocket.averageBuyRate, pocket.currency)}`}</span>
             <span className="text-slate-300">•</span>
-            <span className="whitespace-nowrap text-right">{supportsManualValuation ? 'NAB' : 'Spot'}: Rp {formatRate(pocket.currentMarketRate, pocket.currency)}</span>
+            <span className="whitespace-nowrap text-right">{isRupiahInvestment(pocket) ? 'Nominal Rupiah' : `${supportsManualValuation ? 'NAB' : 'Spot'}: Rp ${formatRate(pocket.currentMarketRate, pocket.currency)}`}</span>
           </div>
         ) : (
           <div className="px-2 py-1 bg-slate-50/60 rounded-lg flex items-center justify-between text-[9px] sm:text-[10px] text-slate-400">

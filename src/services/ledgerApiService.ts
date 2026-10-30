@@ -251,6 +251,8 @@ export const normalizeRemotePocket = (p: any, idx: number = 0): AssetPocket => {
     marketValue,
     marketValueNative,
     marketValueCurrency,
+    valuationCashflowIdr: p.valuationCashflowIdr !== '' && p.valuationCashflowIdr != null && Number.isFinite(Number(p.valuationCashflowIdr))
+      ? Number(p.valuationCashflowIdr) : undefined,
     lastPriceUpdatedAt: p.lastPriceUpdatedAt || p.priceUpdatedAt || undefined,
     isDefault: p.isDefault ?? true,
     sortOrder: typeof p.sortOrder === 'number' ? p.sortOrder : idx + 1,
@@ -351,6 +353,8 @@ export const fetchRemoteLedgerData = async (
         const isCredit = tx.type === 'CREDIT' || String(tx.type).toUpperCase() === 'IN';
         return {
           ...tx,
+            costBasisReleasedIdr: tx.costBasisReleasedIdr !== '' && tx.costBasisReleasedIdr != null && Number.isFinite(Number(tx.costBasisReleasedIdr))
+              ? Number(tx.costBasisReleasedIdr) : undefined,
           id: tx.id || `tx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           pocketId: String(tx.pocketId ?? '').trim(),
           nativeAmount: safeAmount,
@@ -553,6 +557,7 @@ export const syncRemotePockets = async (
         ? String(p.marketValueCurrency || normalizedPocket.currencyCode).trim().toUpperCase()
         : undefined,
       lastPriceUpdatedAt: p.lastPriceUpdatedAt || '',
+      valuationCashflowIdr: p.valuationCashflowIdr,
       updatedAt: p.updatedAt || nowIso,
     };
     });
@@ -580,7 +585,8 @@ export const updateRemotePocketMarketRate = async (
   userEmail: string = currentUserEmail,
   marketValue?: number,
   marketValueNative?: number,
-  marketValueCurrency?: string
+  marketValueCurrency?: string,
+  valuationCashflowIdr?: number
 ): Promise<{ success: boolean; message?: string; [key: string]: any } | null> => {
   try {
     const emailToUse = resolveUserEmail(userEmail);
@@ -606,6 +612,7 @@ export const updateRemotePocketMarketRate = async (
           ? undefined
           : String(marketValueCurrency || '').trim().toUpperCase(),
         lastPriceUpdatedAt,
+        valuationCashflowIdr,
       }),
     });
     return await parseJsonResponse(res);

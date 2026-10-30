@@ -220,6 +220,7 @@ export const PocketManagerModal: React.FC<PocketManagerModalProps> = ({
       marketValue: existingPocket?.marketValue,
       marketValueNative: existingPocket?.marketValueNative,
       marketValueCurrency: existingPocket?.marketValueCurrency,
+      valuationCashflowIdr: existingPocket?.valuationCashflowIdr,
       lastPriceUpdatedAt: existingPocket?.lastPriceUpdatedAt,
       isDefault: editingPocketId ? pockets.find((p) => p.id === editingPocketId)?.isDefault : false,
     };

@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
+import { isRupiahInvestment } from '../../utils/investmentAccounting';
 import {
   CurrencyPocketSummary,
   LedgerTransaction,
@@ -86,7 +87,7 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
       // Moving average cost basis up to cut-off
       let runningBal = 0;
       let runningCost = 0;
-      const sortedTx = [...pocketTxUpToCutoff].sort((a, b) => a.date.localeCompare(b.date));
+      const sortedTx = [...pocketTxUpToCutoff].sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
 
       sortedTx.forEach((tx) => {
         const cost = Math.abs(tx.costIdr ?? (tx.nativeAmount * tx.exchangeRate));
@@ -95,7 +96,9 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
           runningCost += cost;
         } else {
           // DEBET: kurangi proporsional dengan moving average cost
-          if (runningBal > 0) {
+          if (isRupiahInvestment(p) && tx.costBasisReleasedIdr !== undefined) {
+            runningCost = Math.max(0, runningCost - tx.costBasisReleasedIdr);
+          } else if (runningBal > 0) {
             const avgCostRate = runningCost / runningBal;
             runningCost = Math.max(0, runningCost - tx.nativeAmount * avgCostRate);
           }
@@ -103,7 +106,7 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
         }
       });
 
-      const historicalCostBasisIdr = historicalBalanceNative > 0 ? runningCost : 0;
+      const historicalCostBasisIdr = isRupiahInvestment(p) ? runningCost : historicalBalanceNative > 0 ? runningCost : 0;
       // Gunakan nilai pasar per unit dari summary aktif. Ini menghormati manual Market Value/NAB,
       // sementara valas native tetap mengikuti kurs spot pusat terbaru.
       const valuationRate = p.balanceNative > 0 && p.marketValueIdr > 0
@@ -111,7 +114,9 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
         : p.currency === 'IDR'
           ? 1
           : (p.currentMarketRate || p.averageBuyRate || 1);
-      const historicalMarketValueIdr = historicalBalanceNative > 0
+      const historicalMarketValueIdr = isRupiahInvestment(p)
+        ? historicalCostBasisIdr > 0 ? Math.max(0, p.marketValueIdr - (p.balanceNative - historicalBalanceNative)) : 0
+        : historicalBalanceNative > 0
         ? historicalBalanceNative * valuationRate
         : 0;
       const categoryLabel = getPocketTypeLabel(p.currency, p.instrumentType);
@@ -431,7 +436,7 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                           </td>
                           <td className="py-2 px-2 text-right font-sans font-medium tabular-nums text-slate-800">
                             {formatPocketBalance(
-                              p.historicalBalanceNative,
+                              isRupiahInvestment(p) ? p.historicalMarketValueIdr : p.historicalBalanceNative,
                               p.currency,
                               p.instrumentType,
                               p.symbol
