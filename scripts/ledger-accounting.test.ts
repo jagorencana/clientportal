@@ -52,6 +52,7 @@ const gas = vm.createContext({
   Utilities: { formatDate: (date: Date) => new Date(date).toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' }) },
 });
 vm.runInContext(fs.readFileSync('google-apps-script/Code.gs', 'utf8'), gas);
+vm.runInContext(fs.readFileSync('google-apps-script/TransferHandlers.js','utf8'),gas);
 
 test('screenshot: market value is withdrawable independently of remaining acquisition cost', () => {
   const summary = computeCurrencyPocketSummary('IDR', history, 1, pocket);

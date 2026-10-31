@@ -135,6 +135,7 @@ export function computeCurrencyPocketSummary(
     totalCostBasisIdr,
     averageBuyRate,
     currentMarketRate: effectiveSpotRate,
+    fxRateToIdr: code === 'IDR' ? 1 : currentMarketRate,
     manualMarketRate: manualMarketRate > 0 ? manualMarketRate : undefined,
     manualMarketValue: hasStoredMarketValue ? storedMarketValue : undefined,
     manualMarketValueNative: hasStoredNativeMarketValue ? storedNativeMarketValue : undefined,
@@ -206,5 +207,7 @@ export function computeGlobalWealthSummary(
     totalCostBasisIdr,
     totalUnrealizedPnlIdr,
     totalUnrealizedPnlPercent,
+    totalRealizedPnlIdr: pockets.reduce((sum,p) => sum + (p.realizedPnlIdr || 0),0),
+    totalRecordedPnlIdr: totalUnrealizedPnlIdr + pockets.reduce((sum,p) => sum + (p.realizedPnlIdr || 0),0),
   };
 }

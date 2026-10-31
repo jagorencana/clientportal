@@ -23,7 +23,7 @@ interface BackupRestoreModalProps {
     transactions: LedgerTransaction[],
     rates?: Record<CurrencyType, number>,
     pockets?: AssetPocket[]
-  ) => void;
+  ) => Promise<boolean>;
   onReloadRemoteData: () => void;
   onExportCsv: () => void;
 }
@@ -70,7 +70,7 @@ export const BackupRestoreModal: React.FC<BackupRestoreModalProps> = ({
     URL.revokeObjectURL(url);
   };
 
-  const handleImportSubmit = (e: React.FormEvent) => {
+  const handleImportSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setImportError(null);
     setImportSuccessMsg(null);
@@ -86,7 +86,12 @@ export const BackupRestoreModal: React.FC<BackupRestoreModalProps> = ({
       return;
     }
 
-    onImportSuccess(result.transactions, result.marketRates, result.pockets);
+    if(result.transactions.some(t=>t.transferId)||transactions.some(t=>t.transferId)){
+      setImportError('Backup dengan perpindahan harus dipulihkan bersama event LEDGER_TRANSFERS. Impor baris terpisah tidak didukung.');return;
+    }
+    if(!await onImportSuccess(result.transactions, result.marketRates, result.pockets)){
+      setImportError('Pemulihan belum dikonfirmasi. Data JSON tetap tersedia; periksa pesan kesalahan.');return;
+    }
     setImportSuccessMsg(
       `Berhasil memulihkan ${result.transactions.length} baris transaksi mutasi!`
     );

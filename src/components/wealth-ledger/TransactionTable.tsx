@@ -866,11 +866,11 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
               </div>
               <div>
                 <h3 className="text-sm font-bold text-slate-900">
-                  Hapus Baris Transaksi?
+                  {txToDelete.transferId ? 'Batalkan Perpindahan?' : 'Hapus Baris Transaksi?'}
                 </h3>
                 <p className="text-xs text-slate-500 mt-1">
                   Yakin ingin menghapus mutasi &ldquo;{txToDelete.description}&rdquo; ({formatDate(txToDelete.date)})?
-                  Saldo berjalan dan kurs rata-rata akan otomatis dihitung ulang.
+                  {txToDelete.transferId ? 'Kedua sisi perpindahan akan dibatalkan bersama dan saldo kedua kantong dihitung ulang.' : 'Saldo berjalan dan kurs rata-rata akan otomatis dihitung ulang.'}
                 </p>
               </div>
             </div>

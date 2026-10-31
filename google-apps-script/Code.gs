@@ -88,7 +88,8 @@ function handleGetLedgerData(params) {
       success: true,
       userEmail: userEmail,
       pockets: pockets,
-      transactions: transactions,
+      transactions: transactions.concat(loadTransferTransactions(ss,userEmail)),
+      ledgerTransferVersion: 1,
       investmentAccountingVersion: 1
     });
   } catch (err) {
@@ -210,6 +211,9 @@ function doPost(e) {
       return handleRepairLedgerOrphanPockets(postData);
     }
 
+    if (action === 'transfer_ledger_funds') return handleLedgerTransfer(postData, getSpreadsheet());
+    if (action === 'cancel_ledger_transfer') return handleCancelLedgerTransfer(postData, getSpreadsheet());
+
     if (action === 'save_ledger_transaction' || action === 'saveLedgerTransaction') {
       return handleSaveLedgerTransaction(postData);
     }
@@ -299,9 +303,10 @@ function handleSyncLedgerPockets(payload) {
 
     ensureLedgerPocketHeaders(pocketSheet);
     const currentPockets = readTenantLedgerRows(pocketSheet, userEmail);
-    const tenantTransactions = readTenantLedgerRows(ss.getSheetByName('LEDGER_TRANSACTIONS'), userEmail);
+    const tenantTransactions = readTenantLedgerRows(ss.getSheetByName('LEDGER_TRANSACTIONS'), userEmail).concat(loadTransferTransactions(ss,userEmail));
     pockets.forEach(function(pocket) {
       const original = currentPockets.find(function(p) { return String(p.id) === String(pocket.id || pocket.pocketId); });
+      if(original && tenantTransactions.some(function(t){return String(t.pocketId)===String(original.id)&&t.transferId;}) && (normalizePocketInstrumentType(original)!==normalizePocketInstrumentType(pocket)||String(original.currency||original.currencyCode)!==String(pocket.currency||pocket.currencyCode))) throw Error('Batalkan perpindahan terkait sebelum mengubah jenis atau mata uang kantong.');
       if (original && isMoneyInvestment(original) && !isMoneyInvestment(pocket) && tenantTransactions.some(function(t) {
         return String(t.pocketId) === String(original.id) && hasReleasedCost(t);
       })) throw new Error('Perubahan jenis kantong dengan pencairan tercatat memerlukan rekonsiliasi.');
@@ -507,8 +512,9 @@ function handleSaveLedgerTransaction(payload) {
     if (!activePocket) {
       return createJsonResponse({ status: 'error', success: false, message: 'Kantong transaksi tidak ditemukan untuk tenant aktif.' });
     }
-    const history = readTenantLedgerRows(ss.getSheetByName('LEDGER_TRANSACTIONS'), userEmail);
-    const accountingError = validateInvestmentTransaction(activePocket, history, transaction);
+    const history = readTenantLedgerRows(ss.getSheetByName('LEDGER_TRANSACTIONS'), userEmail).concat(loadTransferTransactions(ss,userEmail));
+    if (history.some(function(t){return t.id === transactionId && t.transferId;})) return createJsonResponse({status:'error',success:false,message:'Batalkan perpindahan sebagai pasangan lalu catat ulang; kedua sisi tidak boleh diedit terpisah.'});
+    const accountingError = transferDependencyError(history,transaction) || validateInvestmentTransaction(activePocket, history, transaction);
     if (accountingError) return createJsonResponse({ status: 'error', success: false, message: accountingError });
 
     let sheet = ss.getSheetByName('LEDGER_TRANSACTIONS');
@@ -548,14 +554,18 @@ function handleDeleteLedgerTransaction(payload) {
   if (!userEmail || !transactionId) {
     return createJsonResponse({ status: 'error', success: false, message: 'userEmail dan transactionId wajib diisi.' });
   }
+  const linked = loadTransferTransactions(getSpreadsheet(),userEmail).find(function(t){return t.id===transactionId;});
+  if (linked) return handleCancelLedgerTransfer({userEmail:userEmail,transferId:linked.transferId},getSpreadsheet());
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
     const sheet = getSpreadsheet().getSheetByName('LEDGER_TRANSACTIONS');
     if (!sheet || sheet.getLastRow() < 2) return createJsonResponse({ status: 'success', success: true, deletedRows: 0 });
-    const tenantRows = readTenantLedgerRows(sheet, userEmail);
+    const tenantRows = readTenantLedgerRows(sheet, userEmail).concat(loadTransferTransactions(getSpreadsheet(),userEmail));
     const target = tenantRows.find(function(tx) { return String(tx.id) === transactionId; });
     const pocketSheet = getSpreadsheet().getSheetByName('LEDGER_POCKETS');
+    const transferError=target?transferDependencyError(tenantRows,target):'';
+    if(transferError)return createJsonResponse({status:'error',success:false,message:transferError});
     const targetPocket = target && readTenantLedgerRows(pocketSheet, userEmail).find(function(p) { return String(p.id) === String(target.pocketId); });
     const deletionError = targetPocket ? investmentServerDeletionError(targetPocket, tenantRows, transactionId) : '';
     if (deletionError) return createJsonResponse({ status: 'error', success: false, message: deletionError });
@@ -895,7 +905,7 @@ function handleUpdateLedgerPocketMarketRate(payload) {
         const sheetRow = index + 2;
         const activePocket = readTenantLedgerRows(sheet, userEmail).find(function(p) { return String(p.id) === pocketId; });
         if (activePocket && isMoneyInvestment(activePocket)) {
-          const cashflow = investmentServerPosition(activePocket, readTenantLedgerRows(getSpreadsheet().getSheetByName('LEDGER_TRANSACTIONS'), userEmail)).cashflow;
+          const cashflow = investmentServerPosition(activePocket, readTenantLedgerRows(getSpreadsheet().getSheetByName('LEDGER_TRANSACTIONS'), userEmail).concat(loadTransferTransactions(getSpreadsheet(),userEmail))).cashflow;
           // Older clients do not send an anchor. Derive it from the same locked snapshot.
           // If a new client supplies one, continue rejecting invalid or stale anchors.
           if (payload.valuationCashflowIdr !== undefined &&
@@ -960,6 +970,7 @@ function handleDeleteLedgerPocketCascade(payload) {
     }
 
     // Hapus child rows lebih dahulu untuk menjaga integritas referensial.
+    if(loadTransferTransactions(ss,userEmail).some(function(t){return t.pocketId===pocketId;})) return createJsonResponse({status:'error',success:false,message:'Batalkan perpindahan terkait sebelum menghapus kantong.'});
     const deletedTransactionRows = transactionSheet
       ? deleteTenantPocketRows(transactionSheet, userEmail, pocketId, false)
       : 0;

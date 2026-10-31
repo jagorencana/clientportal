@@ -18,18 +18,20 @@ replaceOnce('    manualMarketRate: find("manualMarketRate", "manualRate"),', '  
 replaceOnce('          updatedAt: pColumns.updatedAt', '          valuationCashflowIdr: pColumns.valuationCashflowIdr >= 0 ? accountingNumber(r[pColumns.valuationCashflowIdr]) : undefined,\n          updatedAt: pColumns.updatedAt');
 replaceOnce("    const notesIndex = txHeaders.indexOf('notes');", "    const notesIndex = txHeaders.indexOf('notes');\n    const releasedIndex = txHeaders.indexOf('costbasisreleasedidr');");
 replaceOnce('          createdAt: r[9]', '          costBasisReleasedIdr: releasedIndex >= 0 ? accountingNumber(r[releasedIndex]) : undefined,\n          createdAt: r[9]');
-replaceOnce('    transactions: transactions\n  });', '    transactions: transactions,\n    investmentAccountingVersion: 1\n  });');
+replaceOnce('    transactions: transactions\n  });', '    transactions: transactions.concat(loadTransferTransactions(ss,targetEmail)),\n    ledgerTransferVersion: 1,\n    investmentAccountingVersion: 1\n  });');
 replaceOnce('      service: "Jago Rencana & Wealth Ledger Unified API V4.5",', '      service: "Jago Rencana & Wealth Ledger Unified API V4.5",\n      investmentAccountingVersion: 1,');
 replaceOnce('  if (key === "totalidr" || key === "costidr") return totalIdr;', '  if (key === "totalidr" || key === "costidr") return totalIdr;\n  if (key === "costbasisreleasedidr") return tx.costBasisReleasedIdr === undefined ? "" : Number(tx.costBasisReleasedIdr);');
 replaceOnce('    const sheet = ensureLedgerTransactionSheet(ss);', `    const positionData = accountingTenantData(ss, userEmail);
+    if (positionData.transactions.some(function(t){return t.id===transactionId&&t.transferId;})) return respondJson({status:'error',success:false,message:'Batalkan perpindahan sebagai pasangan lalu catat ulang.'});
     const activePocket = positionData.pockets.find(function(p) { return String(p.id) === pocketId; });
-    const accountingError = activePocket ? validateInvestmentTransaction(activePocket, positionData.transactions, tx) : 'Kantong tidak ditemukan.';
+    const accountingError = transferDependencyError(positionData.transactions,tx) || (activePocket ? validateInvestmentTransaction(activePocket, positionData.transactions, tx) : 'Kantong tidak ditemukan.');
     if (accountingError) return respondJson({ status: 'error', success: false, message: accountingError });
     const sheet = ensureLedgerTransactionSheet(ss);`);
 replaceOnce('  if (key === "sortorder") return Number(pocket.sortOrder) || position + 1;', '  if (key === "sortorder") return Number(pocket.sortOrder) || position + 1;\n  if (key === "valuationcashflowidr") return pocket.valuationCashflowIdr === undefined ? existingRow : Number(pocket.valuationCashflowIdr);');
 replaceOnce('    const incoming = {};', `    const accountingData = accountingTenantData(ss, targetEmail);
     for (const pocket of pockets) {
       const original = accountingData.pockets.find(function(p) { return String(p.id) === String(pocket.id || pocket.pocketId); });
+      if(original && accountingData.transactions.some(function(t){return String(t.pocketId)===String(original.id)&&t.transferId;}) && (normalizePocketInstrumentType(original)!==normalizePocketInstrumentType(pocket)||String(original.currency||original.currencyCode)!==String(pocket.currency||pocket.currencyCode))) return respondJson({status:'error',success:false,message:'Batalkan perpindahan terkait sebelum mengubah jenis atau mata uang kantong.'});
       if (original && isMoneyInvestment(original) && !isMoneyInvestment(pocket) && accountingData.transactions.some(function(t) {
         return String(t.pocketId) === String(original.id) && hasReleasedCost(t);
       })) return respondJson({ status: 'error', success: false, message: 'Perubahan jenis kantong dengan pencairan tercatat memerlukan rekonsiliasi.' });
@@ -50,12 +52,15 @@ replaceOnce('    if (hasMarketValue && isFinite(marketValue) && marketValue >= 0
 const deleteStart = source.indexOf('function handleDeleteLedgerTransaction(');
 const deleteEnd = source.indexOf('function handleDuitkuCallback(', deleteStart);
 let deletion = source.slice(deleteStart, deleteEnd);
+deletion = deletion.replace('  const lock = LockService.getScriptLock();', `  const linked = loadTransferTransactions(ss,userEmail).find(function(t){return t.id===transactionId;});
+  if(linked) return handleCancelLedgerTransfer({userEmail:userEmail,transferId:linked.transferId},ss);
+  const lock = LockService.getScriptLock();`);
 const deleteMarker = '    const columns = ledgerColumnIndexes(sheet);';
 if (deletion.split(deleteMarker).length !== 2) throw new Error('Unexpected delete handler');
 deletion = deletion.replace(deleteMarker, `    const accountingData = accountingTenantData(ss, userEmail);
     const target = accountingData.transactions.find(function(t) { return String(t.id) === transactionId; });
     const pocket = target && accountingData.pockets.find(function(p) { return String(p.id) === String(target.pocketId); });
-    const deletionError = pocket ? investmentServerDeletionError(pocket, accountingData.transactions, transactionId) : '';
+    const deletionError = (target?transferDependencyError(accountingData.transactions,target):'') || (pocket ? investmentServerDeletionError(pocket, accountingData.transactions, transactionId) : '');
     if (deletionError) return respondJson({ status: 'error', success: false, message: deletionError });
     const columns = ledgerColumnIndexes(sheet);`);
 source = source.slice(0, deleteStart) + deletion + source.slice(deleteEnd);
@@ -104,9 +109,15 @@ function accountingTenantData(ss, email) {
       result[entry[0]].push(record);
     });
   });
+  result.transactions = result.transactions.concat(loadTransferTransactions(ss,email));
   return result;
 }
 `;
+replaceOnce('    if (data.action === "portal_login") {', `    if (data.action === "transfer_ledger_funds") return handleLedgerTransfer(data,ss);
+    if (data.action === "cancel_ledger_transfer") return handleCancelLedgerTransfer(data,ss);
+    if (data.action === "portal_login") {`);
+replaceOnce('    lock.waitLock(8000);', `    lock.waitLock(8000);
+    if(loadTransferTransactions(ss,email).some(function(t){return t.pocketId===pocketId;})) return respondJson({status:'error',success:false,message:'Batalkan perpindahan terkait sebelum menghapus kantong.'});`);
 // Ensure payment/auth/reset handlers are byte-for-byte unchanged.
 for (const [start, end] of [ ['function handleDuitkuCallback(', null] ]) {
   if (original.slice(original.indexOf(start)) !== source.slice(source.indexOf(start))) throw new Error('Unrelated backend code changed');
@@ -114,4 +125,5 @@ for (const [start, end] of [ ['function handleDuitkuCallback(', null] ]) {
 fs.writeFileSync(path.join(outputDir, 'Kode.js'), source);
 fs.writeFileSync(path.join(outputDir, 'InvestmentAccounting.js'), adapter + '\n' + accounting);
 for (const file of ['appsscript.json', '.clasp.json']) fs.copyFileSync(path.join(sourceDir, file), path.join(outputDir, file));
+fs.copyFileSync('google-apps-script/TransferHandlers.js',path.join(outputDir,'TransferHandlers.js'));
 console.log('Patched private deployment copy; authentication and payment handlers unchanged.');

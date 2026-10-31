@@ -14,7 +14,9 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "test:regression": "node scripts/check-auth-regression.mjs && npm run test:ledger",
-    "test:ledger": "tsx --test scripts/ledger-accounting.test.ts"
+    "test:ledger": "tsx --test scripts/ledger-accounting.test.ts scripts/wealth-features.test.ts",
+    "test:active-gas": "tsx --test scripts/active-gas.test.ts scripts/wealth-features.test.ts",
+    "build:gas-transfer": "node scripts/build-transfer-engine.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

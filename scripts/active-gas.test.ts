@@ -40,6 +40,7 @@ test('legacy website can save Rp30,113,208 valuation without the new cashflow fi
   });
   vm.runInContext(fs.readFileSync(path.join(fixture!, 'Kode.js'), 'utf8'), ctx);
   vm.runInContext(fs.readFileSync(path.join(fixture!, 'InvestmentAccounting.js'), 'utf8'), ctx);
+  if(fs.existsSync(path.join(fixture!,'TransferHandlers.js')))vm.runInContext(fs.readFileSync(path.join(fixture!,'TransferHandlers.js'),'utf8'),ctx);
   ctx.respondJson = (value: any) => value;
   const email = 'qa@example.test';
   const pocket = {id:'fund',name:'Reksadana',currency:'IDR',instrumentType:'REKSADANA'};
@@ -72,6 +73,7 @@ test('deployed unified engine integration: redemption, retry, snapshot, tenant b
   });
   vm.runInContext(fs.readFileSync(path.join(fixture!, 'Kode.js'), 'utf8'), ctx);
   vm.runInContext(fs.readFileSync(path.join(fixture!, 'InvestmentAccounting.js'), 'utf8'), ctx);
+  if(fs.existsSync(path.join(fixture!,'TransferHandlers.js')))vm.runInContext(fs.readFileSync(path.join(fixture!,'TransferHandlers.js'),'utf8'),ctx);
   ctx.respondJson = (value: any) => value;
   const email = 'qa@example.test';
   const pocket: AssetPocket = {id:'junior', name:'Junior Vault', currencyCode:'IDR', instrumentType:'SINKING_FUND', symbol:'Rp', flag:'', defaultCustodian:'Test', accentColor:'teal', marketValue:10_756_482, marketValueNative:10_756_482, marketValueCurrency:'IDR', lastPriceUpdatedAt:'2026-10-26T09:16:00Z'};
