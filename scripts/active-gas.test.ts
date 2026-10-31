@@ -94,6 +94,18 @@ test('deployed unified engine integration: redemption, retry, snapshot, tenant b
   const position = investmentPosition({...pocket,...loaded.pockets[0]},nativeRows);
   assert.equal(position.marketValueIdr,756_482);
   assert.ok(Math.abs(position.costBasisIdr - 479_876.7227664208) < 0.000001);
+  const memoEdit = ctx.handleSaveLedgerTransaction({userEmail:email,transaction:{...tx,description:'Corrected memo'}},ss);
+  assert.equal(memoEdit.success,true,JSON.stringify(memoEdit));
+  const editedPreview = redemptionPreview(pocket,history,9_000_000);
+  const editedTx = {...tx,nativeAmount:9_000_000,costIdr:-9_000_000,costBasisReleasedIdr:editedPreview.costBasisReleasedIdr};
+  const amountEdit = ctx.handleSaveLedgerTransaction({userEmail:email,transaction:editedTx},ss);
+  assert.equal(amountEdit.success,true,JSON.stringify(amountEdit));
+  const afterEdit = ctx.handleGetLedgerData(ss,email);
+  assert.equal(afterEdit.transactions.length,history.length+1,'edit must update, not insert');
+  assert.equal(afterEdit.transactions.find((t:any)=>t.id==='e').amount,9_000_000);
+  const afterEditRows = afterEdit.transactions.map((t:any)=>({...t,type:t.type==='IN'?'CREDIT':'DEBET',nativeAmount:t.amount,exchangeRate:t.rate,costIdr:t.totalIdr}));
+  assert.equal(investmentPosition({...pocket,...afterEdit.pockets[0]},afterEditRows).marketValueIdr,1_756_482);
+  assert.equal(ctx.handleSaveLedgerTransaction({userEmail:email,transaction:tx},ss).success,true);
   assert.equal(ctx.handleSaveLedgerTransaction({userEmail:email,transaction:{...tx,id:'f'}},ss).success,false);
   assert.equal(ctx.handleDeleteLedgerTransaction({userEmail:email,transactionId:'a'},ss).success,false);
   const removed = ctx.handleDeleteLedgerTransaction({userEmail:email,transactionId:'e'},ss);

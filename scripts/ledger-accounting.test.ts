@@ -138,8 +138,8 @@ test('backend rejects overdraft, stale cost allocations and backdated redemption
   assert.match(investmentMutationError(pocket, history, { ...tx, date: '2026-10-20' }), /berurutan/);
   const saved = [...history, tx];
   assert.equal(gas.validateInvestmentTransaction(pocket, saved, { ...tx }), '', 'identical network retries are idempotent');
-  assert.match(gas.validateInvestmentTransaction(pocket, saved, { ...tx, nativeAmount: 1 }), /rekonsiliasi/);
-  assert.match(investmentMutationError(pocket, saved, tx), /rekonsiliasi/);
+  assert.match(gas.validateInvestmentTransaction(pocket, saved, { ...tx, nativeAmount: 1 }), /Modal/);
+  assert.equal(investmentMutationError(pocket, saved, tx), '');
   // A second full-sized withdrawal with the previous snapshot is rejected under the server lock.
   assert.match(gas.validateInvestmentTransaction(pocket, saved, { ...tx, id: 'f' }), /melebihi/);
 });
@@ -151,6 +151,25 @@ test('cash, FX, gold and share/unit accounting retain existing balance limits', 
     const summary = computeCurrencyPocketSummary(currencyCode, history, 1, other);
     near(summary.availableBalanceNative!, 6_823_408);
   }
+});
+
+test('latest redemption can change memo or amount with a recalculated acquisition cost', () => {
+  const original = {...transaction('e','2026-10-30','DEBET',10_000_000),costBasisReleasedIdr:redemptionPreview(pocket,history,10_000_000).costBasisReleasedIdr};
+  const rows = [...history,original];
+  const memo = {...original,description:'Corrected memo'};
+  assert.equal(investmentMutationError(pocket,rows,memo),'');
+  assert.equal(gas.validateInvestmentTransaction(pocket,rows,{...memo}),'');
+  const preview = redemptionPreview(pocket,history,9_000_000);
+  const edited = {...original,nativeAmount:9_000_000,costIdr:-9_000_000,costBasisReleasedIdr:preview.costBasisReleasedIdr};
+  assert.equal(investmentMutationError(pocket,rows,edited),'');
+  assert.equal(gas.validateInvestmentTransaction(pocket,rows,{...edited}),'');
+  const position = investmentPosition(pocket,[...history,edited]);
+  near(position.marketValueIdr,1_756_482);
+  near(position.costBasisIdr,6_823_408-preview.costBasisReleasedIdr);
+  near(position.realizedPnlIdr,9_000_000-preview.costBasisReleasedIdr);
+  const later = [...rows,transaction('f','2026-10-31','CREDIT',1_000_000)];
+  assert.match(investmentMutationError(pocket,later,memo),/terakhir/);
+  assert.match(gas.validateInvestmentTransaction(pocket,later,{...memo}),/terakhir/);
 });
 
 test('accounting metadata persists as numeric Sheet columns including zero cost', () => {

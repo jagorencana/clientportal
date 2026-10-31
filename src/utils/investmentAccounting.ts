@@ -67,7 +67,8 @@ export function investmentMutationError(pocket: AssetPocket, transactions: Ledge
   const rows = pocketTransactions(pocket, transactions);
   const existing = rows.find(t => t.id === tx.id);
   if (existing && rows.some(t => t.costBasisReleasedIdr !== undefined)) {
-    return 'Riwayat sebelum/sesudah pencairan bermodal tercatat tidak dapat diedit langsung. Koreksi memerlukan rekonsiliasi.';
+    const dependencyError = investmentDeletionError(pocket, transactions, existing.id);
+    if (dependencyError) return dependencyError;
   }
   if (rows.some(t => t.id !== tx.id && t.date > tx.date)) {
     return 'Masukkan mutasi investasi secara berurutan; tanggal ini mendahului mutasi yang sudah tercatat.';

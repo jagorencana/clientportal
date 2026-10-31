@@ -406,7 +406,9 @@ function validateInvestmentTransaction(pocket, history, tx) {
     const unchanged = ['date', 'currency', 'type', 'description', 'location', 'poscategory', 'nativeamount', 'exchangerate', 'costbasisreleasedidr'].every(function(key) {
       return String(canonicalTransactionValue(existing, key, '')) === String(canonicalTransactionValue(tx, key, ''));
     });
-    return unchanged ? '' : 'Koreksi riwayat pencairan memerlukan rekonsiliasi.';
+    if (unchanged) return '';
+    const dependencyError = investmentServerDeletionError(pocket, history, existing.id);
+    if (dependencyError) return dependencyError;
   }
   if (rows.some(function(t) { return String(t.id) !== String(tx.id) && String(t.date) > String(tx.date); })) return 'Masukkan mutasi investasi secara berurutan.';
   const debit = tx.type === 'DEBET' || tx.type === 'OUT';
