@@ -7,7 +7,7 @@ import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {prepareTransfer,transferDependencyError} from '../src/utils/ledgerTransfers';
 import {computeCurrencyPocketSummary,computeGlobalWealthSummary} from '../src/utils/calculator';
-import {reportFxRate,performanceGroups,recordedRealized} from '../src/utils/wealthPresentation';
+import {reportFxRate,performanceGroups,recordedRealized,valuationInputRate} from '../src/utils/wealthPresentation';
 import {GlobalMetrics} from '../src/components/wealth-ledger/GlobalMetrics';
 import type {AssetPocket,LedgerTransaction} from '../src/types/ledger';
 
@@ -47,6 +47,18 @@ test('investment redemption transfer conserves total assets and recorded gain',(
   const html=renderToStaticMarkup(React.createElement(GlobalMetrics,{summary:after,pocketsCount:2,pockets:p,transactions:afterRows,monthlySurplusCapacity:20_000_000}));
   assert.match(html,/Hasil terealisasi tercatat/);assert.match(html,/Total P\/L tercatat/);assert.match(html,/Riwayat|riwayat/);
   assert.equal(performanceGroups(p).length,2);
+});
+
+test('standardizing FX does not replace gold unit prices or zero a stored valuation when FX is unavailable',()=>{
+  const gold={...pocket('gold','XAU','LOGAM_MULIA'),manualMarketRate:1_200_000};
+  const rate=valuationInputRate(gold,{USD:18_133});
+  near(rate,1_200_000);
+  const g=computeCurrencyPocketSummary('XAU',[deposit(gold,10,1_100_000)],rate,gold);
+  near(g.marketValueIdr,12_000_000);assert.equal(reportFxRate(g,{}),undefined);
+  const usd={...pocket('usd','USD','SAHAM_ETF'),manualMarketRate:18_940,marketValueNative:1000,marketValue:18_133_000};
+  near(valuationInputRate(usd,{USD:18_133}),18_133);
+  const u=computeCurrencyPocketSummary('USD',[deposit(usd,900,17_000)],valuationInputRate(usd,{}),usd);
+  near(u.marketValueIdr,18_133_000);assert.equal(reportFxRate(u,{}),undefined);
 });
 test('cash FX transfer carries acquisition cost rather than pretending an external deposit',()=>{
   const accounts=[pocket('fund','USD'),pocket('cash','USD')],rows=[deposit(accounts[0],100,16_000),deposit(accounts[1],50,17_000)];

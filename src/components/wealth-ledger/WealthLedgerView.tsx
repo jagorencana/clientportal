@@ -47,6 +47,7 @@ import { investmentDeletionError, investmentMutationError, isRupiahInvestment, n
 import { GlobalMetrics } from './GlobalMetrics';
 import {TransferModal} from './TransferModal';
 import {prepareTransfer,transferDependencyError,TransferInput} from '../../utils/ledgerTransfers';
+import {valuationInputRate} from '../../utils/wealthPresentation';
 import { CurrencyWatchlistModal } from './CurrencyWatchlistModal';
 import { PocketGrid } from './PocketGrid';
 import { PocketDetailView } from './PocketDetailView';
@@ -511,7 +512,7 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
         pocket.instrumentType === 'SINKING_FUND' ||
         pocket.instrumentType === 'ASET_FISIK';
       // Currency FX must be shared by every pocket. Manual asset prices remain separate.
-      const currentRate = code === 'IDR' ? 1 : liveFxRates[code] || pocket.manualMarketPrice || 0;
+      const currentRate = valuationInputRate(pocket,liveFxRates);
 
       return computeCurrencyPocketSummary(
         code,

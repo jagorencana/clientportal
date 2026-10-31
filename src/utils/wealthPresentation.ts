@@ -1,8 +1,16 @@
-import type { CurrencyPocketSummary, LedgerTransaction } from '../types/ledger';
+import type { AssetPocket, CurrencyPocketSummary, LedgerTransaction } from '../types/ledger';
+
+export function valuationInputRate(p:AssetPocket,rates:Record<string,number>){
+  const code=p.currencyCode.trim().toUpperCase();
+  if(code==='IDR')return 1;
+  if(code==='XAU'||code==='CUSTOM')return Number(p.manualMarketRate||p.manualMarketPrice||0);
+  return Number(rates[code]||0);
+}
 
 export function reportFxRate(p: CurrencyPocketSummary, rates: Record<string,number>) {
   const code=p.currency.trim().toUpperCase();
   if (code==='IDR') return 1;
+  if(code==='XAU'||!/^[A-Z]{3}$/.test(code))return undefined;
   const rate = rates[code] ?? p.fxRateToIdr;
   return Number.isFinite(rate) && rate! > 0 ? rate : undefined;
 }
