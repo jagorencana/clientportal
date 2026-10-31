@@ -39,7 +39,8 @@ replaceOnce('    if (hasMarketValue && isFinite(marketValue) && marketValue >= 0
     const activePocket = accountingData.pockets.find(function(p) { return String(p.id) === pocketId; });
     if (activePocket && isMoneyInvestment(activePocket)) {
       const cashflow = investmentServerPosition(activePocket, accountingData.transactions).cashflow;
-      if (accountingNumber(data.valuationCashflowIdr) === undefined || Math.abs(Number(data.valuationCashflowIdr) - cashflow) > 0.000001) {
+      if (data.valuationCashflowIdr !== undefined &&
+          (accountingNumber(data.valuationCashflowIdr) === undefined || Math.abs(Number(data.valuationCashflowIdr) - cashflow) > 0.000001)) {
         return respondJson({ status: 'error', success: false, message: 'Mutasi berubah. Muat ulang sebelum memperbarui nilai investasi.' });
       }
       sheet.getRange(targetRow, columns.valuationCashflowIdr + 1).setValue(cashflow);

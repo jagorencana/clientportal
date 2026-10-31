@@ -28,6 +28,38 @@ class Sheet {
   getDataRange() { return this.getRange(1, 1, this.getLastRow(), this.getLastColumn()); }
 }
 
+test('legacy website can save Rp30,113,208 valuation without the new cashflow field', {skip: !fixture}, () => {
+  const sheets = new Map<string, Sheet>();
+  const ss = {getSheetByName: (name: string) => sheets.get(name), insertSheet: (name: string) => {
+    const sheet = new Sheet(); sheets.set(name, sheet); return sheet;
+  }};
+  const ctx = vm.createContext({
+    SpreadsheetApp:{getActiveSpreadsheet: () => ss, flush: () => {}},
+    LockService:{getScriptLock: () => ({waitLock: () => {},releaseLock: () => {}})},
+    Utilities:{formatDate: (date: Date) => new Date(date).toLocaleDateString('en-CA',{timeZone:'Asia/Jakarta'})},
+  });
+  vm.runInContext(fs.readFileSync(path.join(fixture!, 'Kode.js'), 'utf8'), ctx);
+  vm.runInContext(fs.readFileSync(path.join(fixture!, 'InvestmentAccounting.js'), 'utf8'), ctx);
+  ctx.respondJson = (value: any) => value;
+  const email = 'qa@example.test';
+  const pocket = {id:'fund',name:'Reksadana',currency:'IDR',instrumentType:'REKSADANA'};
+  const ps = ctx.ensureLedgerPocketSheet(ss);
+  ps.cells.push(ps.cells[0].map((header: string) => ctx.pocketSyncValue(pocket,header,email,0,'','2026-10-31T00:00:00Z')));
+  const ts = ctx.ensureLedgerTransactionSheet(ss);
+  const tx = {id:'deposit',pocketId:'fund',date:'2026-10-30',type:'IN',amount:30_000_000,rate:1,totalIdr:30_000_000};
+  ts.cells.push(ts.cells[0].map((header: string) => ctx.canonicalLedgerTransactionValue(tx,header,email,'2026-10-30T00:00:00Z') ?? ''));
+  const payload = {userEmail:email,pocketId:'fund',manualMarketRate:30_113_208/30_000_000,
+    marketValue:30_113_208,marketValueNative:30_113_208,marketValueCurrency:'IDR',lastPriceUpdatedAt:'2026-10-31T01:00:00Z'};
+  const result = ctx.handleUpdatePocketMarketValue(payload,ss);
+  assert.equal(result.success,true, JSON.stringify(result));
+  const reloaded = ctx.handleGetLedgerData(ss,email);
+  assert.equal(reloaded.pockets[0].marketValue,30_113_208);
+  assert.equal(reloaded.pockets[0].valuationCashflowIdr,30_000_000);
+  assert.equal(ctx.handleUpdatePocketMarketValue({...payload,valuationCashflowIdr:0},ss).success,false,'explicit stale anchor still rejected');
+  const again = ctx.handleGetLedgerData(ss,email);
+  assert.equal(again.pockets[0].marketValue,30_113_208,'failed update preserves saved valuation');
+});
+
 test('deployed unified engine integration: redemption, retry, snapshot, tenant boundaries', {skip: !fixture}, () => {
   const sheets = new Map<string, Sheet>();
   const ss = { getSheetByName: (name: string) => sheets.get(name), insertSheet: (name: string) => {

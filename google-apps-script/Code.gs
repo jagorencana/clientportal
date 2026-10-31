@@ -880,7 +880,12 @@ function handleUpdateLedgerPocketMarketRate(payload) {
         const activePocket = readTenantLedgerRows(sheet, userEmail).find(function(p) { return String(p.id) === pocketId; });
         if (activePocket && isMoneyInvestment(activePocket)) {
           const cashflow = investmentServerPosition(activePocket, readTenantLedgerRows(getSpreadsheet().getSheetByName('LEDGER_TRANSACTIONS'), userEmail)).cashflow;
-          if (payload.valuationCashflowIdr === undefined || Math.abs(Number(payload.valuationCashflowIdr) - cashflow) > 0.000001) {
+          // Older clients do not send an anchor. Derive it from the same locked snapshot.
+          // If a new client supplies one, continue rejecting invalid or stale anchors.
+          if (payload.valuationCashflowIdr !== undefined &&
+              (payload.valuationCashflowIdr === null || payload.valuationCashflowIdr === '' ||
+               !isFinite(Number(payload.valuationCashflowIdr)) ||
+               Math.abs(Number(payload.valuationCashflowIdr) - cashflow) > 0.000001)) {
             return createJsonResponse({ status: 'error', success: false, message: 'Mutasi berubah. Muat ulang sebelum memperbarui nilai investasi.' });
           }
           sheet.getRange(sheetRow, normalized.indexOf('valuationcashflowidr') + 1).setValue(cashflow);

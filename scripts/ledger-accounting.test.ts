@@ -207,6 +207,10 @@ test('offline Apps Script handlers persist, reload, retry and reconcile investme
     lastPriceUpdatedAt: '2026-10-31T12:00:00Z', valuationCashflowIdr: serverPosition.cashflow,
   };
   assert.equal(gas.handleUpdateLedgerPocketMarketRate({ ...update, valuationCashflowIdr: 0 }).success, false, 'reject stale snapshot anchors');
+  assert.equal(gas.handleUpdateLedgerPocketMarketRate({ ...update, valuationCashflowIdr: undefined }).success, true, 'legacy clients get a server-derived anchor');
+  for (const invalidAnchor of [null, '', 'not-a-number']) {
+    assert.equal(gas.handleUpdateLedgerPocketMarketRate({ ...update, valuationCashflowIdr: invalidAnchor }).success, false);
+  }
   assert.equal(gas.handleUpdateLedgerPocketMarketRate(update).success, true);
   const refreshed = gas.handleGetLedgerData({ userEmail: 'qa@example.test' });
   near(gas.investmentServerPosition(refreshed.pockets[0], refreshed.transactions).marketValueIdr, 800_000);

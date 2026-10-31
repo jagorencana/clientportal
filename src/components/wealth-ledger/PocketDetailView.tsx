@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CurrencyPocketSummary, LedgerTransaction } from '../../types/ledger';
 import { EnrichedTransaction } from '../../utils/calculator';
 import { isRupiahInvestment } from '../../utils/investmentAccounting';
@@ -70,11 +70,20 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
   const [isMarketValueModalOpen, setIsMarketValueModalOpen] = useState(false);
   const [marketValueInput, setMarketValueInput] = useState('');
   const [isSavingMarketValue, setIsSavingMarketValue] = useState(false);
+  const [marketValueSaveError, setMarketValueSaveError] = useState('');
+  const marketValueDraftPocketRef = useRef<string | null>(null);
   const marketValueCurrency = (pocket.currency || 'IDR').toUpperCase();
   const isForeignMarketValue = marketValueCurrency !== 'IDR';
 
   useEffect(() => {
-    if (!isMarketValueModalOpen) return;
+    if (!isMarketValueModalOpen) {
+      marketValueDraftPocketRef.current = null;
+      return;
+    }
+    // Initialize once per opening. Optimistic updates/rollbacks must not erase a draft.
+    if (marketValueDraftPocketRef.current === pocket.pocketId) return;
+    marketValueDraftPocketRef.current = pocket.pocketId;
+    setMarketValueSaveError('');
     setMarketValueInput(
       pocket.manualMarketValueNative !== undefined
         ? formatIdNumber(pocket.manualMarketValueNative, 0, 2)
@@ -84,7 +93,7 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
             : Math.round(pocket.marketValueIdr), 0, 2)
         : ''
     );
-  }, [isMarketValueModalOpen, pocket.manualMarketRate, pocket.manualMarketValue, pocket.manualMarketValueNative, pocket.marketValueIdr, pocket.currentMarketRate, isForeignMarketValue]);
+  }, [isMarketValueModalOpen, pocket.pocketId, pocket.manualMarketRate, pocket.manualMarketValue, pocket.manualMarketValueNative, pocket.marketValueIdr, pocket.currentMarketRate, isForeignMarketValue]);
 
   const parsedMarketInput = parseIdNumber(marketValueInput);
   const previewMarketValue = isForeignMarketValue
@@ -120,15 +129,22 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
   const saveMarketValue = async () => {
     if (previewMarketRate <= 0 || valuationDenominator <= 0) return;
     setIsSavingMarketValue(true);
-    const saved = await onUpdateMarketRate(
-      pocket.pocketId,
-      previewMarketRate,
-      previewMarketValue,
-      parsedMarketInput,
-      marketValueCurrency
-    );
-    setIsSavingMarketValue(false);
-    if (saved) setIsMarketValueModalOpen(false);
+    setMarketValueSaveError('');
+    try {
+      const saved = await onUpdateMarketRate(
+        pocket.pocketId,
+        previewMarketRate,
+        previewMarketValue,
+        parsedMarketInput,
+        marketValueCurrency
+      );
+      if (saved) setIsMarketValueModalOpen(false);
+      else setMarketValueSaveError('Nilai pasar belum tersimpan. Angka Anda tetap di sini; periksa pesan kesalahan dan coba lagi.');
+    } catch {
+      setMarketValueSaveError('Nilai pasar belum tersimpan. Periksa koneksi, lalu coba lagi.');
+    } finally {
+      setIsSavingMarketValue(false);
+    }
   };
 
   // Bersihkan teks nama kantong untuk breadcrumb agar bebas kode ganda dan duplikasi kurung valas
@@ -416,6 +432,7 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
               <div className="border-t border-slate-200 pt-2 flex justify-between gap-3"><span className="font-semibold text-slate-700">Estimasi Floating P/L</span><strong className={previewPnl >= 0 ? 'text-emerald-700' : 'text-rose-700'}>{formatIdr(previewPnl)} ({formatPercent(previewPnlPercent)})</strong></div>
             </div>
 
+            {marketValueSaveError && <p role="alert" className="mt-3 text-xs text-rose-700">{marketValueSaveError}</p>}
             <button
               type="button"
               onClick={saveMarketValue}
