@@ -14,6 +14,20 @@ export function reportFxRate(p: CurrencyPocketSummary, rates: Record<string,numb
   const rate = rates[code] ?? p.fxRateToIdr;
   return Number.isFinite(rate) && rate! > 0 ? rate : undefined;
 }
+
+export function reportValuationKnown(p:CurrencyPocketSummary,cutoff:string) {
+  if(p.instrumentType==='CASH_VALAS') return Number.isFinite(p.fxRateToIdr) && p.fxRateToIdr!>0;
+  const hasValue=[p.manualMarketValue,p.manualMarketValueNative,p.manualMarketRate].some(v=>Number.isFinite(v)&&v!>0);
+  const valuationDay=p.lastPriceUpdatedAt ? new Date(p.lastPriceUpdatedAt).toLocaleDateString('en-CA',{timeZone:'Asia/Jakarta'}) : '';
+  return hasValue && !!valuationDay && valuationDay<=cutoff;
+}
+
+export function reportPerformanceCoverage(items:{historicalMarketValueIdr:number;historicalCostBasisIdr:number;valuationKnown:boolean}[]) {
+  const valued=items.filter(p=>p.valuationKnown);
+  const cost=valued.reduce((sum,p)=>sum+p.historicalCostBasisIdr,0);
+  const floating=valued.reduce((sum,p)=>sum+p.historicalMarketValueIdr-p.historicalCostBasisIdr,0);
+  return {floating,cost,percent:cost>0?floating/cost*100:0,known:valued.length,missing:items.filter(p=>!p.valuationKnown&&(p.historicalMarketValueIdr!==0||p.historicalCostBasisIdr!==0)).length};
+}
 export function performanceClass(p: CurrencyPocketSummary) {
   if(p.instrumentType==='CASH_VALAS') return p.currency==='IDR'?'Kas rupiah':'Valas';
   if(p.instrumentType==='SINKING_FUND') return 'Sinking fund';

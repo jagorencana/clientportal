@@ -74,3 +74,12 @@ The dashboard and nominal-IDR investment detail show floating, recorded realized
 The nominal-IDR method allocates cost proportionally from the reference market valuation. Users should refresh the investment value immediately before redemption and reconcile against provider statements; this is an estimate, not provider unit/NAV lot accounting. Dividends, interest, fees and taxes are not independently supported event types yet and are not represented as a complete total investment return.
 
 Validation added: a positive redemption, negative realization, incoming paired leg and unknown-cost legacy debit are distinguished without double counting. The disclosure is checked in server-rendered UI output; 25 accounting/integration/UI tests pass, along with TypeScript and build checks.
+
+
+## Report valuation coverage
+
+Monthly-report asset totals retain recorded estimates so unvalued holdings do not disappear from wealth/allocation. Manual-price investments require a positive stored manual valuation and a valuation date no later than cutoff to enter reported floating P/L. Cash requires an available FX reference. Missing valuations display a dash for performance rather than a false 0%; mixed groups/footer show incomplete coverage. Summary floating P/L and denominator include only covered assets. These are latest available valuations, not historical month-end prices or period returns.
+
+Realizations without released-cost records display unavailable, not an asserted zero. The report explicitly excludes unclassified dividend/interest income from its completeness claim. Pocket names never automatically generate income or alter transaction classification. No historical transactions or provider prices are fabricated. Users still need to supply current investment valuations and reconcile source records.
+
+Coverage tests check cash FX, unvalued USD/IDR investments, dated manual valuations, future/undated valuations, and preservation of asset totals while excluding unknown performance. 26 tests, TypeScript and production build pass.
