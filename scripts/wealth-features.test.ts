@@ -7,7 +7,7 @@ import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {prepareTransfer,transferDependencyError} from '../src/utils/ledgerTransfers';
 import {computeCurrencyPocketSummary,computeGlobalWealthSummary} from '../src/utils/calculator';
-import {reportFxRate,performanceGroups,recordedRealized,valuationInputRate,realizationDetails} from '../src/utils/wealthPresentation';
+import {reportFxRate,performanceGroups,recordedRealized,valuationInputRate,realizationDetails,reportValuationKnown,reportPerformanceCoverage} from '../src/utils/wealthPresentation';
 import {RealizedPerformance} from '../src/components/wealth-ledger/RealizedPerformance';
 import {GlobalMetrics} from '../src/components/wealth-ledger/GlobalMetrics';
 import type {AssetPocket,LedgerTransaction} from '../src/types/ledger';
@@ -19,6 +19,22 @@ const dest=pocket('cash');
 const deposit=(p:AssetPocket,amount:number,rate=1):LedgerTransaction=>({id:'opening-'+p.id,pocketId:p.id,date:'2026-10-21',currency:p.currencyCode,type:'CREDIT',nativeAmount:amount,exchangeRate:rate,costIdr:amount*rate,description:'Synthetic deposit',posCategory:p.name,location:'Synthetic'});
 const input=(amount=10_000_000)=>({id:'transfer-'+Date.now()+'-'+crypto.randomUUID(),fromPocketId:'fund',toPocketId:'cash',amount,date:'2026-10-31',description:'Synthetic transfer'});
 const summaries=(accounts:AssetPocket[],rows:LedgerTransaction[],rate=1)=>accounts.map(p=>computeCurrencyPocketSummary(p.currencyCode,rows,rate,p));
+
+test('report excludes unvalued investments from performance without dropping their recorded asset value',()=>{
+  const accounts=[pocket('cash','CHF'),pocket('sgov','USD','SAHAM_ETF'),pocket('stock','IDR','SAHAM_ETF'),
+    {...pocket('rdpu','IDR','REKSADANA'),marketValue:20_537_999,marketValueNative:20_537_999,lastPriceUpdatedAt:'2026-10-09T00:00:00Z'}];
+  const rows=accounts.map((p,i)=>deposit(p,[1124.22,2292.93,15_000_000,20_000_000][i],p.currencyCode==='CHF'?22_200:p.currencyCode==='USD'?17_600:1));
+  const pockets=accounts.map(p=>computeCurrencyPocketSummary(p.currencyCode,rows,p.currencyCode==='CHF'?21_992:p.currencyCode==='USD'?18_133:1,p));
+  assert.deepEqual(pockets.map(p=>reportValuationKnown(p,'2026-10-31')),[true,false,false,true]);
+  const items=pockets.map(p=>({historicalMarketValueIdr:p.marketValueIdr,historicalCostBasisIdr:p.totalCostBasisIdr,valuationKnown:reportValuationKnown(p,'2026-10-31')}));
+  const coverage=reportPerformanceCoverage(items);
+  assert.equal(coverage.missing,2);
+  near(coverage.floating,pockets[0].unrealizedPnlIdr+pockets[3].unrealizedPnlIdr);
+  assert.equal(items.reduce((sum,p)=>sum+p.historicalMarketValueIdr,0),pockets.reduce((sum,p)=>sum+p.marketValueIdr,0),'coverage does not remove holdings');
+  assert.equal(reportValuationKnown({...pockets[3],lastPriceUpdatedAt:'2026-11-01T00:00:00Z'},'2026-10-31'),false,'future valuation does not validate historical performance');
+  assert.equal(reportValuationKnown({...pockets[3],lastPriceUpdatedAt:undefined},'2026-10-31'),false,'undated valuation must be disclosed');
+  assert.equal(reportValuationKnown({...pockets[0],fxRateToIdr:undefined},'2026-10-31'),false,'no FX means no verified valuation');
+});
 
 test('realization disclosure counts a disposal once, separates a loss and unknown cost, and avoids double counting wealth',()=>{
   const legs=prepareTransfer([source,dest],[deposit(source,6_823_408)],input());
