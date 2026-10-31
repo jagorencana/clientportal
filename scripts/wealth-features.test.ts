@@ -30,9 +30,9 @@ test('realization disclosure counts a disposal once, separates a loss and unknow
   near(result.total,3_656_468.722766421-20);
   assert.equal(result.rows.find(t=>t.id==='loss')!.pnl,-20);
   const html=renderToStaticMarkup(React.createElement(RealizedPerformance,{transactions:[...legs,loss,unknown],floating:276_605.2772335792}));
-  assert.match(html,/Modal dilepas/);assert.match(html,/tidak ditambahkan lagi/);assert.match(html,/estimasi pembukuan/);
+  assert.doesNotMatch(html,/<details|<summary/);assert.match(html,/Modal dilepas/);assert.match(html,/tidak ditambahkan lagi/);assert.match(html,/estimasi pembukuan/);
   const empty=renderToStaticMarkup(React.createElement(RealizedPerformance,{transactions:[unknown],floating:0}));
-  assert.match(empty,/Belum tersedia/);assert.match(empty,/belum diklasifikasikan/);
+  assert.doesNotMatch(empty,/<table|<details|<summary/);assert.match(empty,/Belum tersedia/);assert.match(empty,/belum diklasifikasikan/);
 });
 
 test('USD pockets share one currency FX even when effective asset ratios differ',()=>{
