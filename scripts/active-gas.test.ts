@@ -28,6 +28,39 @@ class Sheet {
   getDataRange() { return this.getRange(1, 1, this.getLastRow(), this.getLastColumn()); }
 }
 
+test('legacy website can save Rp30,113,208 valuation without the new cashflow field', {skip: !fixture}, () => {
+  const sheets = new Map<string, Sheet>();
+  const ss = {getSheetByName: (name: string) => sheets.get(name), insertSheet: (name: string) => {
+    const sheet = new Sheet(); sheets.set(name, sheet); return sheet;
+  }};
+  const ctx = vm.createContext({
+    SpreadsheetApp:{getActiveSpreadsheet: () => ss, flush: () => {}},
+    LockService:{getScriptLock: () => ({waitLock: () => {},releaseLock: () => {}})},
+    Utilities:{formatDate: (date: Date) => new Date(date).toLocaleDateString('en-CA',{timeZone:'Asia/Jakarta'})},
+  });
+  vm.runInContext(fs.readFileSync(path.join(fixture!, 'Kode.js'), 'utf8'), ctx);
+  vm.runInContext(fs.readFileSync(path.join(fixture!, 'InvestmentAccounting.js'), 'utf8'), ctx);
+  if(fs.existsSync(path.join(fixture!,'TransferHandlers.js')))vm.runInContext(fs.readFileSync(path.join(fixture!,'TransferHandlers.js'),'utf8'),ctx);
+  ctx.respondJson = (value: any) => value;
+  const email = 'qa@example.test';
+  const pocket = {id:'fund',name:'Reksadana',currency:'IDR',instrumentType:'REKSADANA'};
+  const ps = ctx.ensureLedgerPocketSheet(ss);
+  ps.cells.push(ps.cells[0].map((header: string) => ctx.pocketSyncValue(pocket,header,email,0,'','2026-10-31T00:00:00Z')));
+  const ts = ctx.ensureLedgerTransactionSheet(ss);
+  const tx = {id:'deposit',pocketId:'fund',date:'2026-10-30',type:'IN',amount:30_000_000,rate:1,totalIdr:30_000_000};
+  ts.cells.push(ts.cells[0].map((header: string) => ctx.canonicalLedgerTransactionValue(tx,header,email,'2026-10-30T00:00:00Z') ?? ''));
+  const payload = {userEmail:email,pocketId:'fund',manualMarketRate:30_113_208/30_000_000,
+    marketValue:30_113_208,marketValueNative:30_113_208,marketValueCurrency:'IDR',lastPriceUpdatedAt:'2026-10-31T01:00:00Z'};
+  const result = ctx.handleUpdatePocketMarketValue(payload,ss);
+  assert.equal(result.success,true, JSON.stringify(result));
+  const reloaded = ctx.handleGetLedgerData(ss,email);
+  assert.equal(reloaded.pockets[0].marketValue,30_113_208);
+  assert.equal(reloaded.pockets[0].valuationCashflowIdr,30_000_000);
+  assert.equal(ctx.handleUpdatePocketMarketValue({...payload,valuationCashflowIdr:0},ss).success,false,'explicit stale anchor still rejected');
+  const again = ctx.handleGetLedgerData(ss,email);
+  assert.equal(again.pockets[0].marketValue,30_113_208,'failed update preserves saved valuation');
+});
+
 test('deployed unified engine integration: redemption, retry, snapshot, tenant boundaries', {skip: !fixture}, () => {
   const sheets = new Map<string, Sheet>();
   const ss = { getSheetByName: (name: string) => sheets.get(name), insertSheet: (name: string) => {
@@ -40,6 +73,7 @@ test('deployed unified engine integration: redemption, retry, snapshot, tenant b
   });
   vm.runInContext(fs.readFileSync(path.join(fixture!, 'Kode.js'), 'utf8'), ctx);
   vm.runInContext(fs.readFileSync(path.join(fixture!, 'InvestmentAccounting.js'), 'utf8'), ctx);
+  if(fs.existsSync(path.join(fixture!,'TransferHandlers.js')))vm.runInContext(fs.readFileSync(path.join(fixture!,'TransferHandlers.js'),'utf8'),ctx);
   ctx.respondJson = (value: any) => value;
   const email = 'qa@example.test';
   const pocket: AssetPocket = {id:'junior', name:'Junior Vault', currencyCode:'IDR', instrumentType:'SINKING_FUND', symbol:'Rp', flag:'', defaultCustodian:'Test', accentColor:'teal', marketValue:10_756_482, marketValueNative:10_756_482, marketValueCurrency:'IDR', lastPriceUpdatedAt:'2026-10-26T09:16:00Z'};
@@ -62,14 +96,40 @@ test('deployed unified engine integration: redemption, retry, snapshot, tenant b
   const position = investmentPosition({...pocket,...loaded.pockets[0]},nativeRows);
   assert.equal(position.marketValueIdr,756_482);
   assert.ok(Math.abs(position.costBasisIdr - 479_876.7227664208) < 0.000001);
+  const memoEdit = ctx.handleSaveLedgerTransaction({userEmail:email,transaction:{...tx,description:'Corrected memo'}},ss);
+  assert.equal(memoEdit.success,true,JSON.stringify(memoEdit));
+  const editedPreview = redemptionPreview(pocket,history,9_000_000);
+  const editedTx = {...tx,nativeAmount:9_000_000,costIdr:-9_000_000,costBasisReleasedIdr:editedPreview.costBasisReleasedIdr};
+  const amountEdit = ctx.handleSaveLedgerTransaction({userEmail:email,transaction:editedTx},ss);
+  assert.equal(amountEdit.success,true,JSON.stringify(amountEdit));
+  const afterEdit = ctx.handleGetLedgerData(ss,email);
+  assert.equal(afterEdit.transactions.length,history.length+1,'edit must update, not insert');
+  assert.equal(afterEdit.transactions.find((t:any)=>t.id==='e').amount,9_000_000);
+  const afterEditRows = afterEdit.transactions.map((t:any)=>({...t,type:t.type==='IN'?'CREDIT':'DEBET',nativeAmount:t.amount,exchangeRate:t.rate,costIdr:t.totalIdr}));
+  assert.equal(investmentPosition({...pocket,...afterEdit.pockets[0]},afterEditRows).marketValueIdr,1_756_482);
+  assert.equal(ctx.handleSaveLedgerTransaction({userEmail:email,transaction:tx},ss).success,true);
   assert.equal(ctx.handleSaveLedgerTransaction({userEmail:email,transaction:{...tx,id:'f'}},ss).success,false);
   assert.equal(ctx.handleDeleteLedgerTransaction({userEmail:email,transactionId:'a'},ss).success,false);
+  const removed = ctx.handleDeleteLedgerTransaction({userEmail:email,transactionId:'e'},ss);
+  assert.equal(removed.success,true,JSON.stringify(removed));
+  const restored = ctx.handleGetLedgerData(ss,email);
+  const restoredRows = restored.transactions.map((t:any) => ({...t,type:t.type==='IN'?'CREDIT':'DEBET',nativeAmount:t.amount,exchangeRate:t.rate,costIdr:t.totalIdr}));
+  const restoredPosition = investmentPosition({...pocket,...restored.pockets[0]},restoredRows);
+  assert.equal(restoredPosition.marketValueIdr,10_756_482);
+  assert.equal(restoredPosition.costBasisIdr,6_823_408);
+  assert.equal(restoredPosition.realizedPnlIdr,0);
+  assert.equal(restored.transactions.length,history.length);
+  assert.equal(ctx.handleSaveLedgerTransaction({userEmail:email,transaction:tx},ss).success,true);
   assert.equal(ctx.handleGetLedgerData(ss,'other@example.test').transactions.length,0);
   assert.equal(ctx.handleSyncLedgerPockets({userEmail:email,pockets:[{...pocket,instrumentType:'CASH_VALAS'}]},ss).success,false);
   const update = {userEmail:email,pocketId:'junior',marketValue:800_000,marketValueNative:800_000,marketValueCurrency:'IDR',manualMarketRate:1,lastPriceUpdatedAt:'2026-10-31T00:00:00Z',valuationCashflowIdr:position.cashflow};
   assert.equal(ctx.handleUpdatePocketMarketValue({...update,valuationCashflowIdr:0},ss).success,false);
   assert.equal(ctx.handleUpdatePocketMarketValue(update,ss).success,true);
+  assert.equal(ctx.handleDeleteLedgerTransaction({userEmail:email,transactionId:'e'},ss).success,false,'a later valuation prevents unsafe deletion');
+  const memoAfterValuation=ctx.handleSaveLedgerTransaction({userEmail:email,transaction:{...tx,description:'Historical memo only',costBasisReleasedIdr:0}},ss);
+  assert.equal(memoAfterValuation.success,true,JSON.stringify(memoAfterValuation));
   const refreshed = ctx.handleGetLedgerData(ss,email);
+  assert.equal(refreshed.transactions.find((t:any)=>t.id==='e').costBasisReleasedIdr,tx.costBasisReleasedIdr);
   assert.equal(refreshed.pockets[0].valuationCashflowIdr,position.cashflow);
   assert.equal(investmentPosition({...pocket,...refreshed.pockets[0]},nativeRows).marketValueIdr,800_000);
 });

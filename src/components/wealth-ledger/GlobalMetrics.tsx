@@ -1,4 +1,6 @@
 import React, { useMemo } from 'react';
+import { RealizedPerformance } from './RealizedPerformance';
+import { performanceGroups } from '../../utils/wealthPresentation';
 import { CurrencyPocketSummary, GlobalWealthSummary, LedgerTransaction } from '../../types/ledger';
 import { formatIdr, formatPercent } from '../../utils/formatters';
 import { Building2, Coins, Landmark, Target, TrendingDown, TrendingUp, Wallet } from 'lucide-react';
@@ -9,6 +11,7 @@ export interface GlobalMetricsProps {
   pockets: CurrencyPocketSummary[];
   transactions?: LedgerTransaction[];
   monthlySurplusCapacity?: number;
+  fxUpdatedAt?:string;
 }
 
 type AllocationKey = 'CASH_VALAS' | 'INVESTMENT' | 'SINKING_FUND' | 'LOGAM_MULIA' | 'ASET_FISIK';
@@ -41,6 +44,7 @@ export const GlobalMetrics: React.FC<GlobalMetricsProps> = ({
   pockets,
   transactions = [],
   monthlySurplusCapacity,
+  fxUpdatedAt,
 }) => {
   const isPnlPositive = summary.totalUnrealizedPnlIdr >= 0;
   const capacityLimit = monthlySurplusCapacity ?? 15511915;
@@ -48,7 +52,7 @@ export const GlobalMetrics: React.FC<GlobalMetricsProps> = ({
   const monthlyAllocated = transactions
     .filter((transaction) => {
       const isIncoming = transaction.type === 'CREDIT' || String(transaction.type) === 'IN';
-      if (!isIncoming || !transaction.date?.startsWith(currentMonth)) return false;
+      if (!isIncoming || transaction.transferId || !transaction.date?.startsWith(currentMonth)) return false;
       const description = `${transaction.description || ''} ${transaction.notes || ''} ${transaction.posCategory || ''}`.toLowerCase();
       return !description.includes('saldo awal') && !description.includes('initial') && !description.includes('migrasi');
     })
@@ -73,20 +77,23 @@ export const GlobalMetrics: React.FC<GlobalMetricsProps> = ({
     }));
   }, [pockets, summary.totalNetWorthIdr]);
 
+  const performance = performanceGroups(pockets);
+  const firstDate = transactions.map(t=>t.date).sort()[0];
+  const positionDate = new Date().toLocaleDateString('id-ID',{timeZone:'Asia/Jakarta'});
   return (
     <div className="space-y-4">
       <section aria-label="Ringkasan Kekayaan" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="flex min-h-[142px] flex-col justify-between rounded-2xl border border-slate-200/80 bg-white p-4 shadow-xs">
-          <div className="flex items-start justify-between gap-3"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total Net Worth Riil</span><span className="flex h-8 w-8 items-center justify-center rounded-xl bg-teal-50 text-teal-700"><Wallet className="h-4 w-4" /></span></div>
+          <div className="flex items-start justify-between gap-3"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Nilai Seluruh Aset</span><span className="flex h-8 w-8 items-center justify-center rounded-xl bg-teal-50 text-teal-700"><Wallet className="h-4 w-4" /></span></div>
           <div><div className="text-xl font-bold tabular-nums tracking-tight text-slate-900">{formatIdr(summary.totalNetWorthIdr)}</div><p className="mt-1 text-[11px] text-slate-400">Valuasi pasar terkini · {pocketsCount} kantong aset</p></div>
         </div>
         <div className="flex min-h-[142px] flex-col justify-between rounded-2xl border border-slate-200/80 bg-white p-4 shadow-xs">
-          <div className="flex items-start justify-between gap-3"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total Modal Pokok</span><span className="flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-slate-700"><Coins className="h-4 w-4" /></span></div>
-          <div><div className="text-xl font-bold tabular-nums tracking-tight text-slate-900">{formatIdr(summary.totalCostBasisIdr)}</div><p className="mt-1 text-[11px] text-slate-400">Total akumulasi modal perolehan</p></div>
+          <div className="flex items-start justify-between gap-3"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Modal Tersisa</span><span className="flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-slate-700"><Coins className="h-4 w-4" /></span></div>
+          <div><div className="text-xl font-bold tabular-nums tracking-tight text-slate-900">{formatIdr(summary.totalCostBasisIdr)}</div><p className="mt-1 text-[11px] text-slate-400">Modal perolehan aset yang masih dimiliki</p></div>
         </div>
         <div className="flex min-h-[142px] flex-col justify-between rounded-2xl border border-slate-200/80 bg-white p-4 shadow-xs">
-          <div className="flex items-start justify-between gap-3"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Floating Profit / Loss</span><span className={`flex h-8 w-8 items-center justify-center rounded-xl ${isPnlPositive ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>{isPnlPositive ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}</span></div>
-          <div><div className={`text-xl font-bold tabular-nums tracking-tight ${isPnlPositive ? 'text-emerald-600' : 'text-rose-600'}`}>{formatIdr(summary.totalUnrealizedPnlIdr)}</div><p className={`mt-1 text-[11px] font-bold ${isPnlPositive ? 'text-emerald-700' : 'text-rose-700'}`}>{formatPercent(summary.totalUnrealizedPnlPercent)} · Unrealized return</p></div>
+          <div className="flex items-start justify-between gap-3"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Floating P/L · seluruh aset</span><span className={`flex h-8 w-8 items-center justify-center rounded-xl ${isPnlPositive ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>{isPnlPositive ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}</span></div>
+          <div><div className={`text-xl font-bold tabular-nums tracking-tight ${isPnlPositive ? 'text-emerald-600' : 'text-rose-600'}`}>{formatIdr(summary.totalUnrealizedPnlIdr)}</div><p className={`mt-1 text-[11px] font-bold ${isPnlPositive ? 'text-emerald-700' : 'text-rose-700'}`}>{formatPercent(summary.totalUnrealizedPnlPercent)} · Selisih terhadap modal tersisa</p></div>
         </div>
         <div className="flex min-h-[142px] flex-col justify-between rounded-2xl border border-slate-200/80 bg-white p-4 shadow-xs">
           <div className="flex items-start justify-between gap-3"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Amunisi Investasi Bebas</span><span className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-50 text-sm">💡</span></div>
@@ -97,6 +104,14 @@ export const GlobalMetrics: React.FC<GlobalMetricsProps> = ({
             <div className="flex justify-between gap-2 text-emerald-700"><span>Sisa Siap Dialokasikan</span><strong className="whitespace-nowrap">{formatIdr(remainingCapacity)}</strong></div>
           </div>
         </div>
+      </section>
+
+      <section aria-label="Kinerja per kelas aset" className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+        <h2 className="text-sm font-bold text-slate-900">Kinerja aset, terpisah dari jumlah kekayaan</h2>
+        <p className="mt-1 text-xs text-slate-500">Posisi per {positionDate}. Mutasi sejak {firstDate || 'belum ada pencatatan'}; setiap kantong memakai valuasi terakhirnya.</p>
+        <p className="mt-1 text-[11px] text-slate-500">Acuan kurs: {fxUpdatedAt || 'waktu tidak tersedia'}. Saat offline dapat memakai kurs tersimpan.</p>
+        <RealizedPerformance transactions={transactions} floating={summary.totalUnrealizedPnlIdr} />
+        <div className="overflow-x-auto"><table className="w-full text-xs"><thead className="text-slate-500"><tr><th className="py-2 text-left">Kelas aset</th><th className="text-right">Nilai aset</th><th className="text-right">Floating P/L</th><th className="text-right">Realized tercatat</th></tr></thead><tbody>{performance.map(row=><tr key={row.name} className="border-t border-slate-100"><td className="py-2">{row.name}</td><td className="text-right">{formatIdr(row.value)}</td><td className={`text-right ${row.floating<0?'text-rose-600':'text-emerald-700'}`}>{formatIdr(row.floating)}</td><td className="text-right">{formatIdr(row.realized)}</td></tr>)}</tbody></table></div>
       </section>
 
       <section aria-label="Rincian Alokasi Aset" className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-xs sm:p-5">

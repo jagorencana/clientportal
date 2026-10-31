@@ -7,7 +7,7 @@ import {
 } from '../../types/ledger';
 import { AssetAvatar } from './AssetAvatar';
 import { formatIdr, getPocketTypeLabel } from '../../utils/formatters';
-import { investmentMutationError, isRupiahInvestment, redemptionPreview } from '../../utils/investmentAccounting';
+import { investmentMutationError, isRupiahInvestment, redemptionPreview, sameFinancialValues } from '../../utils/investmentAccounting';
 import {
   X,
   ArrowDownLeft,
@@ -114,11 +114,11 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setType(editTransaction.type);
       setDate(editTransaction.date);
       setDescription(editTransaction.description);
-      setNativeAmountStr(formatIdNumber(editTransaction.nativeAmount, 0, 4));
+      setNativeAmountStr(formatIdNumber(editTransaction.nativeAmount, 0, 15));
 
       const r = editTransaction.exchangeRate;
       const dec = r < 1000 && !Number.isInteger(r) ? 2 : 0;
-      setExchangeRateStr(formatIdNumber(r, dec, 4));
+      setExchangeRateStr(formatIdNumber(r, dec, 15));
       setNotes(editTransaction.notes || '');
       setErrorMsg('');
     } else {
@@ -174,16 +174,22 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     : cleanNumericInput(exchangeRateStr);
   const cleanTotalIdr = Math.round(cleanAmount * cleanRate);
   const previewCostIdr = type === 'CREDIT' ? cleanTotalIdr : -cleanTotalIdr;
-  const redemption = isInvestment && type === 'DEBET'
+  const metadataOnly = !!editTransaction && sameFinancialValues(editTransaction,{
+    pocketId:activePocket?.id,date,type,nativeAmount:cleanAmount,exchangeRate:cleanRate,costIdr:previewCostIdr,
+  });
+  const redemption = isInvestment && type === 'DEBET' && !metadataOnly
     ? redemptionPreview(activePocket, transactions.filter(t => t.id !== editTransaction?.id), cleanAmount) : null;
-  const investmentError = redemption && !investmentAccountingReady
+  const mutationError = isInvestment && !metadataOnly && date ? investmentMutationError(activePocket,transactions,{
+    ...editTransaction,id:editTransaction?.id||`tx-${Date.now()}`,date,type,nativeAmount:cleanAmount,exchangeRate:cleanRate,costIdr:previewCostIdr,
+  } as LedgerTransaction) : '';
+  const investmentError = mutationError || (redemption && !investmentAccountingReady
     ? 'Pencairan investasi menunggu pembaruan layanan pencatatan. Hubungi pengelola.'
     : redemption?.ambiguousLegacySnapshot
     ? 'Perbarui nilai investasi sesuai aplikasi terlebih dahulu agar saldo acuan pencairan jelas.'
-    : '';
+    : '');
 
   // Validasi ketat overdraft (blokir penarikan jika nominal > saldo)
-  const isOverdraft = type === 'DEBET' && cleanAmount > currentAvailableBalance;
+  const isOverdraft = !metadataOnly && type === 'DEBET' && cleanAmount > currentAvailableBalance;
   const overdraftError = isOverdraft
     ? `Penarikan melebihi saldo! Saldo tersedia: ${currentAvailableBalance.toLocaleString('id-ID')} ${activePocket?.currencyCode}`
     : '';
@@ -203,9 +209,10 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setErrorMsg(investmentError);
       return;
     }
-    if (isInvestment) {
+    if (isInvestment && !metadataOnly) {
       const mutationError = investmentMutationError(activePocket, transactions, {
-        ...editTransaction, id: editTransaction?.id || '', date, type,
+        ...editTransaction, id: editTransaction?.id || `tx-${Date.now()}`, date, type,
+        nativeAmount:cleanAmount,exchangeRate:cleanRate,costIdr:previewCostIdr,
       } as LedgerTransaction);
       if (mutationError) { setErrorMsg(mutationError); return; }
     }
@@ -238,7 +245,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     }
 
     // Integritas Buku Besar: Blokir transaksi overdraft
-    if (type === 'DEBET' && finalAmount > currentAvailableBalance) {
+    if (!metadataOnly && type === 'DEBET' && finalAmount > currentAvailableBalance) {
       setErrorMsg(
         `Penarikan melebihi saldo! Saldo tersedia: ${currentAvailableBalance.toLocaleString('id-ID')} ${activePocket?.currencyCode}`
       );
@@ -269,7 +276,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       totalIdr: finalCostIdr,
       note: description.trim(),
       notes: notes.trim() || undefined,
-      costBasisReleasedIdr: redemption?.costBasisReleasedIdr,
+      costBasisReleasedIdr: metadataOnly ? editTransaction?.costBasisReleasedIdr : redemption?.costBasisReleasedIdr,
     };
 
     onSave(tx);
@@ -347,14 +354,16 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         <form onSubmit={handleSubmit} className="mt-4 space-y-4">
           {isInvestment && (
             <p className="text-xs text-slate-600">
-              Masukkan nominal rupiah sesuai aplikasi investasi. Nilai investasi mengikuti pembaruan terakhir dan mutasi setelahnya; konfirmasikan hasil pencairan di aplikasi.
+              Masukkan nominal rupiah sesuai aplikasi investasi. Untuk penjualan/pencairan, perbarui nilai pasar tepat sebelum pencairan agar pembagian modal dan untung/rugi sesuai. Perhitungan berbasis nominal adalah estimasi proporsional, bukan data unit/NAB dari penyedia. Jika dananya masuk ke rekening sendiri, gunakan Pindahkan antar kantong agar kedua sisi tercatat sekali.
             </p>
           )}
           {investmentError && <p role="alert" className="text-xs text-rose-600">{investmentError}</p>}
+          {metadataOnly && <p className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600">Edit keterangan/catatan saja: saldo, modal, dan hasil investasi tidak berubah.</p>}
           {redemption && cleanAmount > 0 && !isOverdraft && !investmentError && (
             <div className="rounded-xl bg-teal-50 p-3 text-xs text-teal-800">
               <p>Modal yang dilepas: {formatIdr(redemption.costBasisReleasedIdr)}</p>
-              <p>Hasil investasi terealisasi: {formatIdr(redemption.realizedPnlIdr)}</p>
+              <p>Untung/rugi terealisasi (estimasi): {formatIdr(redemption.realizedPnlIdr)}</p>
+              <p className="mt-1">Dihitung otomatis setelah disimpan. Jangan catat keuntungan lagi sebagai top up. Nominal pencairan mencakup pengembalian modal dan untung/rugi.</p>
             </div>
           )}
           {/* 1. Jenis Mutasi (Masuk vs Keluar) */}
@@ -391,7 +400,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 }`}
               >
                 <ArrowUpRight className="w-4 h-4 text-rose-600" />
-                <span>Keluar / Tarik (Debet)</span>
+                <span>{isInvestment ? 'Jual / Cairkan' : 'Keluar / Tarik (Debet)'}</span>
               </button>
             </div>
           </div>

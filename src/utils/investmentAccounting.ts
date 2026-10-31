@@ -66,8 +66,10 @@ export function redemptionPreview(pocket: AssetPocket, transactions: LedgerTrans
 export function investmentMutationError(pocket: AssetPocket, transactions: LedgerTransaction[], tx: LedgerTransaction) {
   const rows = pocketTransactions(pocket, transactions);
   const existing = rows.find(t => t.id === tx.id);
+  if(existing && sameFinancialValues(existing,tx))return '';
   if (existing && rows.some(t => t.costBasisReleasedIdr !== undefined)) {
-    return 'Riwayat sebelum/sesudah pencairan bermodal tercatat tidak dapat diedit langsung. Koreksi memerlukan rekonsiliasi.';
+    const dependencyError = investmentDeletionError(pocket, transactions, existing.id);
+    if (dependencyError) return dependencyError;
   }
   if (rows.some(t => t.id !== tx.id && t.date > tx.date)) {
     return 'Masukkan mutasi investasi secara berurutan; tanggal ini mendahului mutasi yang sudah tercatat.';
@@ -75,6 +77,31 @@ export function investmentMutationError(pocket: AssetPocket, transactions: Ledge
   if (tx.type === 'DEBET' && pocket.lastPriceUpdatedAt) {
     const date = new Date(pocket.lastPriceUpdatedAt).toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
     if (tx.date < date) return 'Tanggal pencairan tidak boleh mendahului nilai investasi acuan. Rekonsiliasikan riwayat terlebih dahulu.';
+  }
+  return '';
+}
+
+export function sameFinancialValues(a:any,b:any):boolean {
+  const credit=(t:any)=>t.type==='CREDIT'||t.type==='IN';
+  const amount=(t:any)=>Number(t.nativeAmount??t.amount);
+  const rate=(t:any)=>Number(t.exchangeRate??t.rate??1);
+  const total=(t:any)=>Math.abs(Number(t.costIdr??t.totalIdr??amount(t)*rate(t)));
+  return String(a.pocketId)===String(b.pocketId)&&String(a.date)===String(b.date)&&credit(a)===credit(b)&&
+    [amount(a),rate(a),total(a)].every(Number.isFinite)&&amount(a)===amount(b)&&rate(a)===rate(b)&&total(a)===total(b);
+}
+
+export function investmentDeletionError(pocket: AssetPocket, transactions: LedgerTransaction[], id: string) {
+  const rows = pocketTransactions(pocket, transactions);
+  if (!isRupiahInvestment(pocket) || !rows.some(t => t.costBasisReleasedIdr !== undefined)) return '';
+  const target = rows.find(t => t.id === id);
+  if (!target) return '';
+  const latest = [...rows].sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id)).at(-1);
+  if (latest?.id !== id) return 'Hapus mutasi terakhir kantong ini terlebih dahulu agar modal pencairan berikutnya tidak berubah.';
+  if (pocket.lastPriceUpdatedAt) {
+    const valuationDate = new Date(pocket.lastPriceUpdatedAt).toLocaleDateString('en-CA', {timeZone:'Asia/Jakarta'});
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(valuationDate) || valuationDate >= target.date) {
+      return 'Valuasi sudah diperbarui pada/setelah tanggal mutasi ini. Pembatalannya memerlukan rekonsiliasi valuasi.';
+    }
   }
   return '';
 }

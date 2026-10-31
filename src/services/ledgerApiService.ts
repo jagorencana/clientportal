@@ -4,6 +4,18 @@
  */
 
 import { AssetPocket, InstrumentType, LedgerTransaction } from '../types/ledger';
+import type {TransferInput} from '../utils/ledgerTransfers';
+
+export async function saveRemoteTransfer(transfer:TransferInput,email:string) {
+  if(!resolveUserEmail(email))return {success:false,message:'Akun wajib tersedia.'};
+  try{return await parseJsonResponse(await executeApiRequest('',{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'transfer_ledger_funds',userEmail:resolveUserEmail(email),transfer})}));}
+  catch(error:any){return {success:false,message:error?.message||'Perpindahan belum dikonfirmasi.'};}
+}
+export async function cancelRemoteTransfer(transferId:string,email:string) {
+  if(!resolveUserEmail(email))return {success:false,message:'Akun wajib tersedia.'};
+  try{return await parseJsonResponse(await executeApiRequest('',{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'cancel_ledger_transfer',userEmail:resolveUserEmail(email),transferId})}));}
+  catch(error:any){return {success:false,message:error?.message||'Pembatalan belum dikonfirmasi.'};}
+}
 
 const FALLBACK_GAS_URL =
   'https://script.google.com/macros/s/AKfycbwnCkUHXODtKuStZvUnbdohnZyLLD9p53o6VNmMrnpWbaNaSd1PHfP3dInyOjybTdmF/exec';
@@ -349,7 +361,8 @@ export const fetchRemoteLedgerData = async (
           : Number(rawRate);
         const safeAmount = Number.isFinite(cleanAmount) ? cleanAmount : 0;
         const safeRate = Number.isFinite(cleanRate) ? cleanRate : 1;
-        const safeTotalIdr = Math.round(safeAmount * safeRate);
+        const storedTotal=Number(tx.totalIdr??tx.costIdr);
+        const safeTotalIdr = tx.transferId && Number.isFinite(storedTotal) ? Math.abs(storedTotal) : Math.round(safeAmount * safeRate);
         const isCredit = tx.type === 'CREDIT' || String(tx.type).toUpperCase() === 'IN';
         return {
           ...tx,

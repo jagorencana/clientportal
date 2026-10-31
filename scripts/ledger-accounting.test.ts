@@ -3,9 +3,12 @@ import { test } from 'node:test';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import { computeCurrencyPocketSummary } from '../src/utils/calculator';
-import { investmentMutationError, investmentPosition, isRupiahInvestment, redemptionPreview } from '../src/utils/investmentAccounting';
+import { investmentDeletionError, investmentMutationError, investmentPosition, isRupiahInvestment, redemptionPreview, sameFinancialValues } from '../src/utils/investmentAccounting';
 import type { AssetPocket, LedgerTransaction } from '../src/types/ledger';
 import { formatIdNumber, parseIdNumber } from '../src/utils/numberInput';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { TransactionModal } from '../src/components/wealth-ledger/TransactionModal';
 
 const pocket: AssetPocket = {
   id: 'junior', name: 'Junior Vault', currencyCode: 'IDR', instrumentType: 'SINKING_FUND',
@@ -25,6 +28,17 @@ const history = [transaction('a', '2026-09-21', 'CREDIT', 33_843_008),
   transaction('d', '2026-10-21', 'CREDIT', 3_500_000)];
 const near = (actual: number, expected: number) => assert.ok(Math.abs(actual - expected) < 0.000001, `${actual} != ${expected}`);
 
+test('actual withdrawal form renders market value as the limit for Junior Vault', () => {
+  const html = renderToStaticMarkup(React.createElement(TransactionModal, {
+    isOpen: true, onClose: () => {}, onSave: () => {},
+    defaultPocketId: pocket.id, defaultType: 'DEBET', currentRates: {IDR: 1},
+    pockets: [pocket], transactions: history, investmentAccountingReady: true,
+  }));
+  assert.match(html, /Nilai Investasi Tercatat/);
+  assert.match(html, /Maks:\s*10\.756\.482/);
+  assert.doesNotMatch(html, /Maks:\s*6\.823\.408/);
+});
+
 test('Indonesian rupiah input and prefilled valuations preserve thousands and decimal separators', () => {
   assert.equal(parseIdNumber('10.756.482'), 10_756_482);
   assert.equal(parseIdNumber('10.756.482,50'), 10_756_482.5);
@@ -38,6 +52,7 @@ const gas = vm.createContext({
   Utilities: { formatDate: (date: Date) => new Date(date).toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' }) },
 });
 vm.runInContext(fs.readFileSync('google-apps-script/Code.gs', 'utf8'), gas);
+vm.runInContext(fs.readFileSync('google-apps-script/TransferHandlers.js','utf8'),gas);
 
 test('screenshot: market value is withdrawable independently of remaining acquisition cost', () => {
   const summary = computeCurrencyPocketSummary('IDR', history, 1, pocket);
@@ -74,6 +89,26 @@ test('full redemption and subsequent top-up do not resurrect the old valuation',
   near(topped.costBasisIdr, 1_000_000);
 });
 
+test('only a last mutation not included in a newer valuation can be deleted', () => {
+  const preview = redemptionPreview(pocket, history, 10_000_000);
+  const tx = {...transaction('e','2026-10-30','DEBET',10_000_000),costBasisReleasedIdr:preview.costBasisReleasedIdr};
+  const rows = [...history, tx];
+  assert.equal(investmentDeletionError(pocket, rows, tx.id),'');
+  assert.equal(gas.investmentServerDeletionError(pocket,rows,tx.id),'');
+  assert.match(investmentDeletionError(pocket,rows,'a'),/terakhir/);
+  const later = [...rows,transaction('f','2026-10-31','CREDIT',1_000_000)];
+  assert.match(investmentDeletionError(pocket,later,'e'),/terakhir/);
+  assert.match(gas.investmentServerDeletionError(pocket,later,'e'),/terakhir/);
+  assert.equal(investmentDeletionError(pocket,later,'f'),'');
+  for (const date of ['2026-10-30T10:00:00Z','2026-10-31T10:00:00Z']) {
+    const updated = {...pocket,lastPriceUpdatedAt:date};
+    assert.match(investmentDeletionError(updated,rows,'e'),/Valuasi/);
+    assert.match(gas.investmentServerDeletionError(updated,rows,'e'),/Valuasi/);
+  }
+  const otherPocket = {...transaction('f','2026-10-31','CREDIT',1),pocketId:'another'};
+  assert.equal(investmentDeletionError(pocket,[...rows,otherPocket],'e'),'');
+});
+
 test('redemption at a loss and without a manual valuation', () => {
   const lossPocket = { ...pocket, marketValue: 5_000_000, marketValueNative: 5_000_000 };
   const loss = redemptionPreview(lossPocket, history, 1_000_000);
@@ -104,8 +139,8 @@ test('backend rejects overdraft, stale cost allocations and backdated redemption
   assert.match(investmentMutationError(pocket, history, { ...tx, date: '2026-10-20' }), /berurutan/);
   const saved = [...history, tx];
   assert.equal(gas.validateInvestmentTransaction(pocket, saved, { ...tx }), '', 'identical network retries are idempotent');
-  assert.match(gas.validateInvestmentTransaction(pocket, saved, { ...tx, nativeAmount: 1 }), /rekonsiliasi/);
-  assert.match(investmentMutationError(pocket, saved, tx), /rekonsiliasi/);
+  assert.match(gas.validateInvestmentTransaction(pocket, saved, { ...tx, nativeAmount: 1 }), /Modal/);
+  assert.equal(investmentMutationError(pocket, saved, tx), '');
   // A second full-sized withdrawal with the previous snapshot is rejected under the server lock.
   assert.match(gas.validateInvestmentTransaction(pocket, saved, { ...tx, id: 'f' }), /melebihi/);
 });
@@ -117,6 +152,42 @@ test('cash, FX, gold and share/unit accounting retain existing balance limits', 
     const summary = computeCurrencyPocketSummary(currencyCode, history, 1, other);
     near(summary.availableBalanceNative!, 6_823_408);
   }
+});
+
+test('latest redemption can change memo or amount with a recalculated acquisition cost', () => {
+  const original = {...transaction('e','2026-10-30','DEBET',10_000_000),costBasisReleasedIdr:redemptionPreview(pocket,history,10_000_000).costBasisReleasedIdr};
+  const rows = [...history,original];
+  const memo = {...original,description:'Corrected memo'};
+  assert.equal(investmentMutationError(pocket,rows,memo),'');
+  assert.equal(gas.validateInvestmentTransaction(pocket,rows,{...memo}),'');
+  const preview = redemptionPreview(pocket,history,9_000_000);
+  const edited = {...original,nativeAmount:9_000_000,costIdr:-9_000_000,costBasisReleasedIdr:preview.costBasisReleasedIdr};
+  assert.equal(investmentMutationError(pocket,rows,edited),'');
+  assert.equal(gas.validateInvestmentTransaction(pocket,rows,{...edited}),'');
+  const position = investmentPosition(pocket,[...history,edited]);
+  near(position.marketValueIdr,1_756_482);
+  near(position.costBasisIdr,6_823_408-preview.costBasisReleasedIdr);
+  near(position.realizedPnlIdr,9_000_000-preview.costBasisReleasedIdr);
+  const later = [...rows,transaction('f','2026-10-31','CREDIT',1_000_000)];
+  assert.equal(investmentMutationError(pocket,later,memo),'');
+  assert.equal(gas.validateInvestmentTransaction(pocket,later,{...memo}),'');
+  assert.match(investmentMutationError(pocket,later,edited),/terakhir/);
+  assert.match(gas.validateInvestmentTransaction(pocket,later,{...edited}),/terakhir/);
+});
+
+test('memo-only edits remain safe after later transactions and valuations',()=>{
+  const original={...transaction('e','2026-10-30','DEBET',10_000_000),costBasisReleasedIdr:redemptionPreview(pocket,history,10_000_000).costBasisReleasedIdr};
+  const rows=[...history,original,transaction('f','2026-10-31','CREDIT',1_000_000)];
+  const updated={...pocket,lastPriceUpdatedAt:'2026-11-01T00:00:00Z'};
+  const memo={...original,description:'Corrected historical memo',costBasisReleasedIdr:0};
+  assert.equal(sameFinancialValues(original,memo),true);
+  assert.equal(investmentMutationError(updated,rows,memo),'');
+  assert.equal(gas.validateInvestmentTransaction(updated,rows,memo),'');
+  near(memo.costBasisReleasedIdr,original.costBasisReleasedIdr);
+  const change={...memo,nativeAmount:9_000_000,costIdr:-9_000_000};
+  assert.equal(sameFinancialValues(original,change),false);
+  assert.match(investmentMutationError(updated,rows,change),/terakhir/);
+  assert.match(gas.validateInvestmentTransaction(updated,rows,change),/terakhir/);
 });
 
 test('accounting metadata persists as numeric Sheet columns including zero cost', () => {
@@ -154,6 +225,7 @@ class FakeSheet {
   cells: any[][] = [];
   constructor(public name: string) {}
   getName() { return this.name; }
+  deleteRow(row: number) { this.cells.splice(row - 1, 1); }
   getLastRow() { return this.cells.length; }
   getLastColumn() { return Math.max(0, ...this.cells.map(row => row.length)); }
   getRange(row: number, col: number, height = 1, width = 1) {
@@ -201,12 +273,22 @@ test('offline Apps Script handlers persist, reload, retry and reconcile investme
   near(serverPosition.costBasisIdr, 6_823_408 - preview.costBasisReleasedIdr);
   assert.equal(gas.handleSaveLedgerTransaction({ userEmail: 'qa@example.test', transaction: { ...tx, id: 'f' } }).success, false);
   assert.equal(gas.handleDeleteLedgerTransaction({ userEmail: 'qa@example.test', transactionId: 'a' }).success, false);
+  assert.equal(gas.handleDeleteLedgerTransaction({ userEmail: 'qa@example.test', transactionId: 'e' }).success, true);
+  const restored = gas.handleGetLedgerData({userEmail:'qa@example.test'});
+  near(gas.investmentServerPosition(restored.pockets[0],restored.transactions).marketValueIdr,10_756_482);
+  near(gas.investmentServerPosition(restored.pockets[0],restored.transactions).costBasisIdr,6_823_408);
+  assert.equal(restored.transactions.length,history.length);
+  assert.equal(gas.handleSaveLedgerTransaction(payload).success,true);
   const update = {
     userEmail: 'qa@example.test', pocketId: 'junior', manualMarketRate: 1,
     marketValue: 800_000, marketValueNative: 800_000, marketValueCurrency: 'IDR',
     lastPriceUpdatedAt: '2026-10-31T12:00:00Z', valuationCashflowIdr: serverPosition.cashflow,
   };
   assert.equal(gas.handleUpdateLedgerPocketMarketRate({ ...update, valuationCashflowIdr: 0 }).success, false, 'reject stale snapshot anchors');
+  assert.equal(gas.handleUpdateLedgerPocketMarketRate({ ...update, valuationCashflowIdr: undefined }).success, true, 'legacy clients get a server-derived anchor');
+  for (const invalidAnchor of [null, '', 'not-a-number']) {
+    assert.equal(gas.handleUpdateLedgerPocketMarketRate({ ...update, valuationCashflowIdr: invalidAnchor }).success, false);
+  }
   assert.equal(gas.handleUpdateLedgerPocketMarketRate(update).success, true);
   const refreshed = gas.handleGetLedgerData({ userEmail: 'qa@example.test' });
   near(gas.investmentServerPosition(refreshed.pockets[0], refreshed.transactions).marketValueIdr, 800_000);

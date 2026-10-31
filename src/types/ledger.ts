@@ -70,6 +70,9 @@ export interface LedgerTransaction {
   note?: string;             // Alias for notes / description
   notes?: string;
   costBasisReleasedIdr?: number; // IDR investment redemption: allocated acquisition cost
+  transferId?: string;
+  transferLeg?: 'OUT' | 'IN';
+  transferPeerPocketId?: string;
 }
 
 // User-friendly interface alias
@@ -91,6 +94,7 @@ export interface CurrencyPocketSummary {
   totalCostBasisIdr: number;   // Akumulasi modal beli bersih (IDR)
   averageBuyRate: number;      // Kurs rata-rata = totalCostBasisIdr / balanceNative
   currentMarketRate: number;   // Kurs pasar terkini
+  fxRateToIdr?: number; // Canonical currency FX, never market-value/balance ratio
   manualMarketRate?: number;   // Harga pasar / NAB manual per unit dalam IDR
   manualMarketValue?: number;  // Total nilai pasar manual tersimpan
   manualMarketValueNative?: number;
@@ -108,6 +112,8 @@ export interface GlobalWealthSummary {
   totalCostBasisIdr: number;
   totalUnrealizedPnlIdr: number;
   totalUnrealizedPnlPercent: number;
+  totalRealizedPnlIdr?: number;
+  totalRecordedPnlIdr?: number;
 }
 
 export interface DiscrepancyDetail {

@@ -243,13 +243,15 @@ export const PocketCard: React.FC<PocketCardProps> = ({
         </div>
       </div>
 
+      {supportsManualValuation && <p className="mt-1 text-[9px] text-slate-400">{pocket.lastPriceUpdatedAt ? `Valuasi per ${new Date(pocket.lastPriceUpdatedAt).toLocaleDateString('id-ID',{timeZone:'Asia/Jakarta'})}; disesuaikan mutasi` : 'Valuasi manual belum diperbarui'}</p>}
+
       {/* ZONA 3: KURS SPOT & AVG (KOMPAK DI DASAR KARTU) */}
       <div className="mt-auto pt-1">
         {pocket.currency !== 'IDR' || supportsManualValuation ? (
           <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-2.5 py-1.5 bg-slate-50 rounded-lg border border-slate-100 text-[10px] font-sans text-slate-500 tabular-nums">
             <span className="whitespace-nowrap">{isRupiahInvestment(pocket) ? `Modal: Rp ${Math.round(pocket.totalCostBasisIdr).toLocaleString('id-ID')}` : `Avg: Rp ${formatRate(pocket.averageBuyRate, pocket.currency)}`}</span>
             <span className="text-slate-300">•</span>
-            <span className="whitespace-nowrap text-right">{isRupiahInvestment(pocket) ? 'Nominal Rupiah' : `${supportsManualValuation ? 'NAB' : 'Spot'}: Rp ${formatRate(pocket.currentMarketRate, pocket.currency)}`}</span>
+            <span className="whitespace-nowrap text-right">{isRupiahInvestment(pocket) ? 'Nominal Rupiah' : pocket.currency!=='IDR' && pocket.currency!=='XAU' ? `FX: ${pocket.fxRateToIdr ? 'Rp '+formatRate(pocket.fxRateToIdr,pocket.currency) : '—'}` : `${supportsManualValuation ? 'Harga unit' : 'Spot'}: Rp ${formatRate(pocket.currentMarketRate,pocket.currency)}`}</span>
           </div>
         ) : (
           <div className="px-2 py-1 bg-slate-50/60 rounded-lg flex items-center justify-between text-[9px] sm:text-[10px] text-slate-400">

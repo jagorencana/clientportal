@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { isRupiahInvestment } from '../../utils/investmentAccounting';
+import { recordedRealized, reportFxRate } from '../../utils/wealthPresentation';
 import {
   CurrencyPocketSummary,
   LedgerTransaction,
@@ -30,6 +31,8 @@ interface MonthlyReportModalProps {
   onClose: () => void;
   pockets: CurrencyPocketSummary[];
   transactions: LedgerTransaction[];
+  fxRates?: Record<string,number>;
+  fxUpdatedAt?: string;
 }
 
 export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
@@ -37,6 +40,8 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
   onClose,
   pockets,
   transactions,
+  fxRates = {},
+  fxUpdatedAt,
 }) => {
   const now = new Date();
   // 1-indexed month (1 = Jan, 12 = Des)
@@ -50,7 +55,7 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
   ];
 
   const periodLabel = `${monthNames[selectedMonth]} ${selectedYear}`;
-  const todayDateStr = now.toISOString().split('T')[0];
+  const todayDateStr = now.toLocaleDateString('en-CA',{timeZone:'Asia/Jakarta'});
   const currentDateStr = formatDate(todayDateStr);
 
   // =========================================================================
@@ -129,7 +134,7 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
         historicalBalanceNative,
         historicalCostBasisIdr,
         historicalMarketValueIdr,
-        spotRate: valuationRate,
+        spotRate: reportFxRate(p,fxRates),
         categoryLabel,
       };
     });
@@ -145,7 +150,7 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
       floatingPnl,
       floatingPnlPercent,
     };
-  }, [pockets, transactions, cutOffDateStr]);
+  }, [pockets, transactions, cutOffDateStr, fxRates]);
 
   const groupedAssets = useMemo(() => {
     const order = [
@@ -178,7 +183,7 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
   // 2. REKAPITULASI ARUS KAS (HANYA MUTASI PADA BULAN TERPILIH)
   const currentMonthTransactions = useMemo(() => {
     return transactions.filter(
-      (t) => t.date >= firstDayDateStr && t.date <= cutOffDateStr
+      (t) => !t.transferId && t.date >= firstDayDateStr && t.date <= cutOffDateStr
     );
   }, [transactions, firstDayDateStr, cutOffDateStr]);
 
@@ -195,6 +200,8 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
   }, [currentMonthTransactions]);
 
   const monthlyNet = monthlyInflow - monthlyOutflow;
+  const realizedInPeriod = recordedRealized(transactions,firstDayDateStr,cutOffDateStr);
+  const realizedToCutoff = recordedRealized(transactions,'',cutOffDateStr);
 
   const handlePrint = () => {
     window.print();
@@ -371,9 +378,13 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                       historicalData.floatingPnl >= 0 ? 'text-emerald-700' : 'text-rose-700'
                     }`}
                   >
-                    Return: {formatPercent(historicalData.floatingPnlPercent)}
+                    Selisih / modal tersisa: {formatPercent(historicalData.floatingPnlPercent)}
                   </div>
                 </div>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-3 text-[10px]">
+                <div className="rounded-lg border border-slate-200 p-3"><div>Hasil terealisasi tercatat · {periodLabel}</div><strong className="text-sm">{formatIdr(realizedInPeriod)}</strong></div>
+                <div className="rounded-lg border border-slate-200 p-3"><div>Total P/L tercatat hingga cut-off</div><strong className="text-sm">{formatIdr(historicalData.floatingPnl+realizedToCutoff)}</strong><p>Floating + hasil terealisasi yang tersedia. Riwayat lama belum tentu lengkap.</p></div>
               </div>
             </div>
 
@@ -384,6 +395,7 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
               </div>
               <div className="mb-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[10px] leading-relaxed text-sky-900">
                 <strong>{positionBasisLabel}.</strong> Saldo menggunakan transaksi hingga tanggal tersebut. Nilai pasar memakai NAB/manual market value terakhir dan kurs spot pada saat laporan dicetak, karena histori harga pasar harian belum disimpan.
+                <p>Kurs FX menggunakan satu acuan per mata uang, terpisah dari kenaikan/penurunan nilai investasi. Kurs transaksi historis tetap mengikuti jurnal dan dapat berbeda. {fxUpdatedAt ? `Acuan kurs diperbarui: ${fxUpdatedAt}.` : 'Waktu acuan kurs tidak tersedia.'}</p>
               </div>
               <div className="report-asset-table w-full border border-slate-200 rounded-lg overflow-hidden">
                 <table className="w-full text-left text-[10px] border-collapse table-fixed">
@@ -391,8 +403,8 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                     <tr className="bg-slate-100 text-slate-600 font-bold border-b border-slate-200 font-sans">
                       <th className="w-[21%] py-2.5 px-2">Kantong</th>
                       <th className="w-[17%] py-2.5 px-2">Kustodian</th>
-                      <th className="w-[15%] py-2.5 px-2 text-right">Saldo Native</th>
-                      <th className="w-[12%] py-2.5 px-2 text-right">Rate Valuasi</th>
+                      <th className="w-[15%] py-2.5 px-2 text-right">Saldo Tercatat</th>
+                      <th className="w-[12%] py-2.5 px-2 text-right">Kurs FX ke IDR</th>
                       <th className="w-[18%] py-2.5 px-2 text-right">Nilai Pasar IDR</th>
                       <th className="w-[7%] py-2.5 px-1 text-right">Porsi</th>
                       <th className="w-[10%] py-2.5 px-1 text-right">Floating P/L (%)</th>
@@ -428,6 +440,7 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                               </span>
                               <span className="min-w-0 truncate font-sans" title={p.name || p.currencyName}>{p.name || p.currencyName}</span>
                             </div>
+                            <div className="text-[8px] font-normal text-slate-400">{p.lastPriceUpdatedAt ? `Valuasi: ${new Date(p.lastPriceUpdatedAt).toLocaleDateString('id-ID',{timeZone:'Asia/Jakarta'})}` : p.instrumentType==='CASH_VALAS'?'Saldo jurnal × kurs FX':'Valuasi manual belum dicatat'}</div>
                           </td>
                           <td className="py-2 px-2 text-[11px] text-slate-600 font-sans">
                             <div className="truncate" title={p.defaultCustodian || '—'}>
@@ -443,10 +456,11 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                             )}
                           </td>
                           <td className="py-2 px-2 text-right font-sans font-medium tabular-nums text-slate-500 text-[10px]">
-                            {`Rp ${formatRate(p.spotRate, p.currency)}`}
+                            {p.spotRate ? `Rp ${formatRate(p.spotRate, p.currency)}` : '—'}
                           </td>
                           <td className="py-2 px-2 text-right font-sans font-bold tabular-nums text-slate-900">
                             {formatIdr(p.historicalMarketValueIdr)}
+                            {p.currency!=='IDR' && p.spotRate && <div className="text-[8px] font-normal text-slate-500">{p.manualMarketValueNative && p.marketValueCurrency===p.currency?'Nilai pasar':'Ekuivalen'}: {(p.historicalMarketValueIdr/p.spotRate).toLocaleString('id-ID',{maximumFractionDigits:2})} {p.currency}</div>}
                           </td>
                           <td className="py-2 px-2 text-right font-sans font-medium tabular-nums text-slate-700">
                             {sharePercent.toFixed(1)}%

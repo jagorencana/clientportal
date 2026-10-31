@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CurrencyPocketSummary, LedgerTransaction } from '../../types/ledger';
 import { EnrichedTransaction } from '../../utils/calculator';
 import { isRupiahInvestment } from '../../utils/investmentAccounting';
+import { realizationDetails } from '../../utils/wealthPresentation';
 import { formatIdNumber, parseIdNumber } from '../../utils/numberInput';
 import { AssetAvatar } from './AssetAvatar';
 import {
@@ -11,6 +12,7 @@ import {
   getPocketTypeLabel,
   formatPocketBalance,
 } from '../../utils/formatters';
+import { RealizedPerformance } from './RealizedPerformance';
 import { TransactionTable } from './TransactionTable';
 import {
   ArrowLeft,
@@ -59,6 +61,7 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
   const isPnlPositive = pocket.unrealizedPnlIdr >= 0;
   const isIdr = (pocket.currency || '').toUpperCase() === 'IDR';
   const isInvestment = isRupiahInvestment(pocket);
+  const pocketRealizations = realizationDetails(transactions.filter(t=>t.pocketId===pocket.pocketId));
   const custodianDisplay =
     pocket.defaultCustodian || (isIdr ? 'BCA / Jago / Cash' : 'CIMB Niaga');
   const supportsManualValuation =
@@ -70,11 +73,20 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
   const [isMarketValueModalOpen, setIsMarketValueModalOpen] = useState(false);
   const [marketValueInput, setMarketValueInput] = useState('');
   const [isSavingMarketValue, setIsSavingMarketValue] = useState(false);
+  const [marketValueSaveError, setMarketValueSaveError] = useState('');
+  const marketValueDraftPocketRef = useRef<string | null>(null);
   const marketValueCurrency = (pocket.currency || 'IDR').toUpperCase();
   const isForeignMarketValue = marketValueCurrency !== 'IDR';
 
   useEffect(() => {
-    if (!isMarketValueModalOpen) return;
+    if (!isMarketValueModalOpen) {
+      marketValueDraftPocketRef.current = null;
+      return;
+    }
+    // Initialize once per opening. Optimistic updates/rollbacks must not erase a draft.
+    if (marketValueDraftPocketRef.current === pocket.pocketId) return;
+    marketValueDraftPocketRef.current = pocket.pocketId;
+    setMarketValueSaveError('');
     setMarketValueInput(
       pocket.manualMarketValueNative !== undefined
         ? formatIdNumber(pocket.manualMarketValueNative, 0, 2)
@@ -84,7 +96,7 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
             : Math.round(pocket.marketValueIdr), 0, 2)
         : ''
     );
-  }, [isMarketValueModalOpen, pocket.manualMarketRate, pocket.manualMarketValue, pocket.manualMarketValueNative, pocket.marketValueIdr, pocket.currentMarketRate, isForeignMarketValue]);
+  }, [isMarketValueModalOpen, pocket.pocketId, pocket.manualMarketRate, pocket.manualMarketValue, pocket.manualMarketValueNative, pocket.marketValueIdr, pocket.currentMarketRate, isForeignMarketValue]);
 
   const parsedMarketInput = parseIdNumber(marketValueInput);
   const previewMarketValue = isForeignMarketValue
@@ -120,15 +132,22 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
   const saveMarketValue = async () => {
     if (previewMarketRate <= 0 || valuationDenominator <= 0) return;
     setIsSavingMarketValue(true);
-    const saved = await onUpdateMarketRate(
-      pocket.pocketId,
-      previewMarketRate,
-      previewMarketValue,
-      parsedMarketInput,
-      marketValueCurrency
-    );
-    setIsSavingMarketValue(false);
-    if (saved) setIsMarketValueModalOpen(false);
+    setMarketValueSaveError('');
+    try {
+      const saved = await onUpdateMarketRate(
+        pocket.pocketId,
+        previewMarketRate,
+        previewMarketValue,
+        parsedMarketInput,
+        marketValueCurrency
+      );
+      if (saved) setIsMarketValueModalOpen(false);
+      else setMarketValueSaveError('Nilai pasar belum tersimpan. Angka Anda tetap di sini; periksa pesan kesalahan dan coba lagi.');
+    } catch {
+      setMarketValueSaveError('Nilai pasar belum tersimpan. Periksa koneksi, lalu coba lagi.');
+    } finally {
+      setIsSavingMarketValue(false);
+    }
   };
 
   // Bersihkan teks nama kantong untuk breadcrumb agar bebas kode ganda dan duplikasi kurung valas
@@ -285,7 +304,7 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
                 className="bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 transition-colors font-medium rounded-xl px-4 py-2 text-sm flex items-center gap-1.5 shadow-sm active:scale-[0.99] cursor-pointer"
               >
                 <ArrowUpRight className="w-4 h-4 text-rose-600" />
-                <span>- Tarik / Keluar</span>
+                <span>{isInvestment ? 'Jual / Cairkan Investasi' : '- Tarik / Keluar'}</span>
               </button>
             </div>
           </div>
@@ -296,10 +315,10 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
             <div className="bg-white/80 backdrop-blur-xs p-3.5 rounded-xl border border-slate-200/80">
               <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
                 <Coins className="w-3.5 h-3.5 text-slate-500" />
-                <span>{isInvestment ? 'Hasil Terealisasi' : 'Kurs Rata-Rata'}</span>
+                <span>{isInvestment ? 'Untung/Rugi Terealisasi' : 'Kurs Rata-Rata'}</span>
               </div>
               <div className="text-lg sm:text-xl font-black text-slate-900 font-sans tabular-nums mt-1">
-                {isInvestment ? formatIdr(pocket.realizedPnlIdr || 0) : isIdr && !supportsManualValuation ? '1.0' : `Rp ${formatRate(pocket.averageBuyRate, pocket.currency)}`}
+                {isInvestment ? pocketRealizations.rows.length ? formatIdr(pocketRealizations.total) : 'Belum tersedia' : isIdr && !supportsManualValuation ? '1.0' : `Rp ${formatRate(pocket.averageBuyRate, pocket.currency)}`}
               </div>
               <div className="text-[10px] text-slate-400 mt-0.5">
                 {isInvestment ? 'Dari pencairan dengan modal tercatat' : 'Weighted average cost'}
@@ -338,13 +357,13 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
             <div className="bg-white/80 backdrop-blur-xs p-3.5 rounded-xl border border-slate-200/80">
               <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
                 <DollarSign className="w-3.5 h-3.5 text-slate-500" />
-                <span>Total Modal (Cost)</span>
+                <span>Modal Tersisa</span>
               </div>
               <div className="text-lg sm:text-xl font-black text-slate-900 font-sans tabular-nums mt-1">
                 {formatIdr(pocket.totalCostBasisIdr)}
               </div>
               <div className="text-[10px] text-slate-400 mt-0.5">
-                Cost basis bersih
+                Modal perolehan aset yang masih dimiliki
               </div>
             </div>
 
@@ -356,7 +375,7 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
                 ) : (
                   <TrendingDown className="w-3.5 h-3.5 text-rose-600" />
                 )}
-                <span>Floating PnL</span>
+                <span>Belum Direalisasikan</span>
               </div>
               <div
                 className={`text-lg sm:text-xl font-black font-sans tabular-nums mt-1 ${
@@ -374,6 +393,7 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
               </div>
             </div>
           </div>
+          {isInvestment && <RealizedPerformance transactions={transactions.filter(t=>t.pocketId===pocket.pocketId)} floating={pocket.unrealizedPnlIdr} />}
         </div>
       </section>
 
@@ -416,6 +436,7 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
               <div className="border-t border-slate-200 pt-2 flex justify-between gap-3"><span className="font-semibold text-slate-700">Estimasi Floating P/L</span><strong className={previewPnl >= 0 ? 'text-emerald-700' : 'text-rose-700'}>{formatIdr(previewPnl)} ({formatPercent(previewPnlPercent)})</strong></div>
             </div>
 
+            {marketValueSaveError && <p role="alert" className="mt-3 text-xs text-rose-700">{marketValueSaveError}</p>}
             <button
               type="button"
               onClick={saveMarketValue}
