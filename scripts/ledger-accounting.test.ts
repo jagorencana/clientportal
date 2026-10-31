@@ -6,6 +6,9 @@ import { computeCurrencyPocketSummary } from '../src/utils/calculator';
 import { investmentMutationError, investmentPosition, isRupiahInvestment, redemptionPreview } from '../src/utils/investmentAccounting';
 import type { AssetPocket, LedgerTransaction } from '../src/types/ledger';
 import { formatIdNumber, parseIdNumber } from '../src/utils/numberInput';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { TransactionModal } from '../src/components/wealth-ledger/TransactionModal';
 
 const pocket: AssetPocket = {
   id: 'junior', name: 'Junior Vault', currencyCode: 'IDR', instrumentType: 'SINKING_FUND',
@@ -24,6 +27,17 @@ const history = [transaction('a', '2026-09-21', 'CREDIT', 33_843_008),
   transaction('c', '2026-10-07', 'DEBET', 30_000_000),
   transaction('d', '2026-10-21', 'CREDIT', 3_500_000)];
 const near = (actual: number, expected: number) => assert.ok(Math.abs(actual - expected) < 0.000001, `${actual} != ${expected}`);
+
+test('actual withdrawal form renders market value as the limit for Junior Vault', () => {
+  const html = renderToStaticMarkup(React.createElement(TransactionModal, {
+    isOpen: true, onClose: () => {}, onSave: () => {},
+    defaultPocketId: pocket.id, defaultType: 'DEBET', currentRates: {IDR: 1},
+    pockets: [pocket], transactions: history, investmentAccountingReady: true,
+  }));
+  assert.match(html, /Nilai Investasi Tercatat/);
+  assert.match(html, /Maks:\s*10\.756\.482/);
+  assert.doesNotMatch(html, /Maks:\s*6\.823\.408/);
+});
 
 test('Indonesian rupiah input and prefilled valuations preserve thousands and decimal separators', () => {
   assert.equal(parseIdNumber('10.756.482'), 10_756_482);
