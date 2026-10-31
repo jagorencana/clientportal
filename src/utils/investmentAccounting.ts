@@ -66,6 +66,7 @@ export function redemptionPreview(pocket: AssetPocket, transactions: LedgerTrans
 export function investmentMutationError(pocket: AssetPocket, transactions: LedgerTransaction[], tx: LedgerTransaction) {
   const rows = pocketTransactions(pocket, transactions);
   const existing = rows.find(t => t.id === tx.id);
+  if(existing && sameFinancialValues(existing,tx))return '';
   if (existing && rows.some(t => t.costBasisReleasedIdr !== undefined)) {
     const dependencyError = investmentDeletionError(pocket, transactions, existing.id);
     if (dependencyError) return dependencyError;
@@ -78,6 +79,15 @@ export function investmentMutationError(pocket: AssetPocket, transactions: Ledge
     if (tx.date < date) return 'Tanggal pencairan tidak boleh mendahului nilai investasi acuan. Rekonsiliasikan riwayat terlebih dahulu.';
   }
   return '';
+}
+
+export function sameFinancialValues(a:any,b:any):boolean {
+  const credit=(t:any)=>t.type==='CREDIT'||t.type==='IN';
+  const amount=(t:any)=>Number(t.nativeAmount??t.amount);
+  const rate=(t:any)=>Number(t.exchangeRate??t.rate??1);
+  const total=(t:any)=>Math.abs(Number(t.costIdr??t.totalIdr??amount(t)*rate(t)));
+  return String(a.pocketId)===String(b.pocketId)&&String(a.date)===String(b.date)&&credit(a)===credit(b)&&
+    [amount(a),rate(a),total(a)].every(Number.isFinite)&&amount(a)===amount(b)&&rate(a)===rate(b)&&total(a)===total(b);
 }
 
 export function investmentDeletionError(pocket: AssetPocket, transactions: LedgerTransaction[], id: string) {

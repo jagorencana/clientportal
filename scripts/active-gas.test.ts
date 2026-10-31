@@ -126,7 +126,10 @@ test('deployed unified engine integration: redemption, retry, snapshot, tenant b
   assert.equal(ctx.handleUpdatePocketMarketValue({...update,valuationCashflowIdr:0},ss).success,false);
   assert.equal(ctx.handleUpdatePocketMarketValue(update,ss).success,true);
   assert.equal(ctx.handleDeleteLedgerTransaction({userEmail:email,transactionId:'e'},ss).success,false,'a later valuation prevents unsafe deletion');
+  const memoAfterValuation=ctx.handleSaveLedgerTransaction({userEmail:email,transaction:{...tx,description:'Historical memo only',costBasisReleasedIdr:0}},ss);
+  assert.equal(memoAfterValuation.success,true,JSON.stringify(memoAfterValuation));
   const refreshed = ctx.handleGetLedgerData(ss,email);
+  assert.equal(refreshed.transactions.find((t:any)=>t.id==='e').costBasisReleasedIdr,tx.costBasisReleasedIdr);
   assert.equal(refreshed.pockets[0].valuationCashflowIdr,position.cashflow);
   assert.equal(investmentPosition({...pocket,...refreshed.pockets[0]},nativeRows).marketValueIdr,800_000);
 });

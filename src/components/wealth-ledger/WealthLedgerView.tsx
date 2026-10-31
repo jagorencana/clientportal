@@ -43,7 +43,7 @@ import {
   cancelRemoteTransfer,
 } from '../../services/ledgerApiService';
 import { exportLedgerTransactionsToCsv } from '../../services/reportService';
-import { investmentDeletionError, investmentMutationError, isRupiahInvestment, netCashflow, pocketTransactions, redemptionPreview } from '../../utils/investmentAccounting';
+import { investmentDeletionError, investmentMutationError, isRupiahInvestment, netCashflow, pocketTransactions, redemptionPreview, sameFinancialValues } from '../../utils/investmentAccounting';
 import { GlobalMetrics } from './GlobalMetrics';
 import {TransferModal} from './TransferModal';
 import {prepareTransfer,transferDependencyError,TransferInput} from '../../utils/ledgerTransfers';
@@ -652,11 +652,14 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
   };
 
   const handleSaveTransaction = async (tx: LedgerTransaction) => {
-    const transferError=transferDependencyError(transactionsRef.current,tx);
+    const previous=transactionsRef.current.find(t=>t.id===tx.id);
+    const metadataOnly=!!previous && !previous.transferId && sameFinancialValues(previous,tx);
+    if(metadataOnly)tx={...tx,costBasisReleasedIdr:previous!.costBasisReleasedIdr};
+    const transferError=metadataOnly?'':transferDependencyError(transactionsRef.current,tx);
     if(transferError){showToast(transferError);return;}
     const pocket = pocketsRef.current.find(p => p.id === tx.pocketId);
     const isInvestment = pocket && isRupiahInvestment(pocket);
-    if (isInvestment) {
+    if (isInvestment && !metadataOnly) {
       const history = transactionsRef.current;
       const mutationError = investmentMutationError(pocket, history, tx);
       if (mutationError) { showToast(mutationError); return; }
@@ -672,7 +675,7 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
         }
         tx = { ...tx, costBasisReleasedIdr: preview.costBasisReleasedIdr };
       }
-    } else if (tx.type === 'DEBET') {
+    } else if (!metadataOnly && tx.type === 'DEBET') {
       const currentBalance = transactions
         .filter(
           (t) =>

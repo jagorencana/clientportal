@@ -24,7 +24,10 @@ replaceOnce('  if (key === "totalidr" || key === "costidr") return totalIdr;', '
 replaceOnce('    const sheet = ensureLedgerTransactionSheet(ss);', `    const positionData = accountingTenantData(ss, userEmail);
     if (positionData.transactions.some(function(t){return t.id===transactionId&&t.transferId;})) return respondJson({status:'error',success:false,message:'Batalkan perpindahan sebagai pasangan lalu catat ulang.'});
     const activePocket = positionData.pockets.find(function(p) { return String(p.id) === pocketId; });
-    const accountingError = transferDependencyError(positionData.transactions,tx) || (activePocket ? validateInvestmentTransaction(activePocket, positionData.transactions, tx) : 'Kantong tidak ditemukan.');
+    const previous=positionData.transactions.find(function(t){return String(t.id)===transactionId;});
+    const metadataOnly=previous&&!previous.transferId&&sameServerFinancialValues(previous,tx);
+    if(metadataOnly)tx.costBasisReleasedIdr=previous.costBasisReleasedIdr;
+    const accountingError = metadataOnly?'':transferDependencyError(positionData.transactions,tx) || (activePocket ? validateInvestmentTransaction(activePocket, positionData.transactions, tx) : 'Kantong tidak ditemukan.');
     if (accountingError) return respondJson({ status: 'error', success: false, message: accountingError });
     const sheet = ensureLedgerTransactionSheet(ss);`);
 replaceOnce('  if (key === "sortorder") return Number(pocket.sortOrder) || position + 1;', '  if (key === "sortorder") return Number(pocket.sortOrder) || position + 1;\n  if (key === "valuationcashflowidr") return pocket.valuationCashflowIdr === undefined ? existingRow : Number(pocket.valuationCashflowIdr);');

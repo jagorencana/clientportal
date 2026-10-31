@@ -41,10 +41,25 @@ Tes mencakup FX USD seragam dengan rasio hasil investasi yang berbeda; total ase
 
 ## Penerapan oleh pemilik
 
-1. Tinjau/terapkan hotfix PR #2 terlebih dahulu; branch fitur ini dibangun di atas hotfix itu.
+1. PR #3 adalah paket terpadu dan sudah memuat seluruh commit hotfix PR #2. Tinjau/terapkan PR #3; tidak perlu menggabungkan kedua PR secara terpisah.
 2. Cadangkan kode Apps Script dan workbook lengkap. Data akun lama tidak perlu direset.
 3. Paket Apps Script terdiri dari `Kode.js`, `InvestmentAccounting.js`, **`TransferHandlers.js`**, **`TransferEngine.js`**, serta manifest proyek aktif yang tidak diubah. File engine dihasilkan dari source TypeScript, bukan diedit manual.
 4. Setelah pemilik mengaktifkan backend versi baru pada deployment yang sama, muat ulang data. `ledgerTransferVersion: 1` dari respons remote mengaktifkan tombol perpindahan pada frontend baru; cache atau backend lama tidak mengaktifkannya.
 5. Terapkan website dari PR fitur dan lakukan uji staging/akun QA sebelum memakai pencatatan nyata. Tidak ada transaksi uji yang dijalankan terhadap data produksi dalam pekerjaan ini.
 
 **Backup, migrasi, dan rollback:** sertakan tab LEDGER_TRANSFERS saat mengekspor workbook atau migrasi Supabase; event void juga merupakan audit. Setelah transfer nyata tercatat, jangan menurunkan backend ke versi yang tidak membaca event transfer karena kedua sisi akan hilang dari tampilan meskipun event masih tersimpan. Rollback harus mempertahankan loader/handler transfer atau merekonsiliasi event lebih dahulu. Menu impor per-baris bukan jalur pemulihan event transfer. Fitur ini memerlukan review perubahan penyimpanan, bukan sekadar penggantian label.
+
+## Pemeriksaan paket terpadu
+
+| Pembahasan | Perbaikan dalam paket | Bukti pengujian |
+| --- | --- | --- |
+| Nilai pasar gagal tersimpan | Payload lama tanpa anchor tetap diterima; anchor dihitung di bawah lock | Simpan Rp30.113.208, muat ulang, tolak anchor usang |
+| Input kosong setelah gagal simpan | Draft dipertahankan, kegagalan ditampilkan, loading dipulihkan | Peninjauan form dan simulasi gagal simpan lokal |
+| WD Rp10 juta dari Junior Vault | Batas memakai nilai investasi; modal dilepas proporsional | Rp756.482 tersisa, modal Rp479.876,72, realized Rp3.656.468,72 |
+| Edit/hapus terkunci | Koreksi nominal/hapus mutasi terakhir yang belum menjadi dasar transaksi/valuasi lain; memo-only tidak mengubah angka | Edit Rp10 juta ke Rp9 juta, edit memo setelah valuasi baru, hapus dan muat ulang posisi awal |
+| Floating merah membingungkan | Pisahkan floating, realized tercatat, total P/L, dan kelas aset | Pemeriksaan rumus, SSR, dan pratinjau browser |
+| Transfer internal | Satu event untuk kedua sisi, modal kas dibawa, cancel berpasangan | Total aset/P&L tetap, failure/retry, pembatalan, batas tenant |
+| Kurs USD berbeda | Kolom FX memakai satu benchmark, bukan nilai aset dibagi saldo | Beberapa kantong USD berbeda valuasi memakai FX sama; harga emas tetap dipertahankan |
+| Periode dan tanggal valuasi | Cut-off laporan, realized bulan terpilih, tanggal per kantong dan acuan FX | Filter tanggal, pratinjau laporan |
+
+Belum diklaim: uji tulis pada akun produksi, PDF hasil dialog cetak akun produksi, rekonstruksi realized historis yang datanya tidak ada, transfer beda mata uang/fee/unit saham, impor event transfer melalui JSON lama, atau migrasi Supabase. Perubahan ekonomi pada riwayat yang memiliki transaksi/valuasi dependen tetap memerlukan rekonsiliasi; mengedit teks tidak mengubah modal, saldo, atau hasil investasi.

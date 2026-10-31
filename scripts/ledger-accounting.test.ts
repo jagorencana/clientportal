@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import { computeCurrencyPocketSummary } from '../src/utils/calculator';
-import { investmentDeletionError, investmentMutationError, investmentPosition, isRupiahInvestment, redemptionPreview } from '../src/utils/investmentAccounting';
+import { investmentDeletionError, investmentMutationError, investmentPosition, isRupiahInvestment, redemptionPreview, sameFinancialValues } from '../src/utils/investmentAccounting';
 import type { AssetPocket, LedgerTransaction } from '../src/types/ledger';
 import { formatIdNumber, parseIdNumber } from '../src/utils/numberInput';
 import React from 'react';
@@ -169,8 +169,25 @@ test('latest redemption can change memo or amount with a recalculated acquisitio
   near(position.costBasisIdr,6_823_408-preview.costBasisReleasedIdr);
   near(position.realizedPnlIdr,9_000_000-preview.costBasisReleasedIdr);
   const later = [...rows,transaction('f','2026-10-31','CREDIT',1_000_000)];
-  assert.match(investmentMutationError(pocket,later,memo),/terakhir/);
-  assert.match(gas.validateInvestmentTransaction(pocket,later,{...memo}),/terakhir/);
+  assert.equal(investmentMutationError(pocket,later,memo),'');
+  assert.equal(gas.validateInvestmentTransaction(pocket,later,{...memo}),'');
+  assert.match(investmentMutationError(pocket,later,edited),/terakhir/);
+  assert.match(gas.validateInvestmentTransaction(pocket,later,{...edited}),/terakhir/);
+});
+
+test('memo-only edits remain safe after later transactions and valuations',()=>{
+  const original={...transaction('e','2026-10-30','DEBET',10_000_000),costBasisReleasedIdr:redemptionPreview(pocket,history,10_000_000).costBasisReleasedIdr};
+  const rows=[...history,original,transaction('f','2026-10-31','CREDIT',1_000_000)];
+  const updated={...pocket,lastPriceUpdatedAt:'2026-11-01T00:00:00Z'};
+  const memo={...original,description:'Corrected historical memo',costBasisReleasedIdr:0};
+  assert.equal(sameFinancialValues(original,memo),true);
+  assert.equal(investmentMutationError(updated,rows,memo),'');
+  assert.equal(gas.validateInvestmentTransaction(updated,rows,memo),'');
+  near(memo.costBasisReleasedIdr,original.costBasisReleasedIdr);
+  const change={...memo,nativeAmount:9_000_000,costIdr:-9_000_000};
+  assert.equal(sameFinancialValues(original,change),false);
+  assert.match(investmentMutationError(updated,rows,change),/terakhir/);
+  assert.match(gas.validateInvestmentTransaction(updated,rows,change),/terakhir/);
 });
 
 test('accounting metadata persists as numeric Sheet columns including zero cost', () => {

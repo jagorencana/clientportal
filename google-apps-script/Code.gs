@@ -402,10 +402,23 @@ function investmentServerPosition(pocket, transactions) {
   return { cashflow: cashflow, marketValueIdr: hasValuation ? Number(rawValue) + cashflow - baseline : cashflow, costBasisIdr: cost, ambiguousLegacySnapshot: ambiguous };
 }
 
+function sameServerFinancialValues(a,b) {
+  const credit=function(t){return t.type==='CREDIT'||t.type==='IN';};
+  const amount=function(t){return Number(t.nativeAmount!==undefined?t.nativeAmount:t.amount);};
+  const rate=function(t){return Number(t.exchangeRate!==undefined?t.exchangeRate:t.rate!==undefined?t.rate:1);};
+  const total=function(t){return Math.abs(Number(t.costIdr!==undefined?t.costIdr:t.totalIdr!==undefined?t.totalIdr:amount(t)*rate(t)));};
+  return String(a.pocketId)===String(b.pocketId)&&String(a.date)===String(b.date)&&credit(a)===credit(b)&&
+    [amount(a),rate(a),total(a)].every(function(v){return isFinite(v);})&&amount(a)===amount(b)&&rate(a)===rate(b)&&total(a)===total(b);
+}
+
 function validateInvestmentTransaction(pocket, history, tx) {
   if (!isMoneyInvestment(pocket)) { delete tx.costBasisReleasedIdr; return ''; }
   const rows = history.filter(function(t) { return String(t.pocketId) === String(tx.pocketId); });
   const existing = rows.find(function(t) { return String(t.id) === String(tx.id); });
+  if(existing && !existing.transferId && sameServerFinancialValues(existing,tx)){
+    tx.costBasisReleasedIdr=existing.costBasisReleasedIdr;
+    return '';
+  }
   if (existing && rows.some(hasReleasedCost)) {
     // A lost response may trigger an identical retry. Accept it without treating it as an edit.
     const unchanged = ['date', 'currency', 'type', 'description', 'location', 'poscategory', 'nativeamount', 'exchangerate', 'costbasisreleasedidr'].every(function(key) {
@@ -514,7 +527,10 @@ function handleSaveLedgerTransaction(payload) {
     }
     const history = readTenantLedgerRows(ss.getSheetByName('LEDGER_TRANSACTIONS'), userEmail).concat(loadTransferTransactions(ss,userEmail));
     if (history.some(function(t){return t.id === transactionId && t.transferId;})) return createJsonResponse({status:'error',success:false,message:'Batalkan perpindahan sebagai pasangan lalu catat ulang; kedua sisi tidak boleh diedit terpisah.'});
-    const accountingError = transferDependencyError(history,transaction) || validateInvestmentTransaction(activePocket, history, transaction);
+    const previous=history.find(function(t){return String(t.id)===transactionId;});
+    const metadataOnly=previous&&!previous.transferId&&sameServerFinancialValues(previous,transaction);
+    if(metadataOnly)transaction.costBasisReleasedIdr=previous.costBasisReleasedIdr;
+    const accountingError = metadataOnly?'':transferDependencyError(history,transaction) || validateInvestmentTransaction(activePocket, history, transaction);
     if (accountingError) return createJsonResponse({ status: 'error', success: false, message: accountingError });
 
     let sheet = ss.getSheetByName('LEDGER_TRANSACTIONS');
