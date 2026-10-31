@@ -41,7 +41,7 @@ import {
   setCurrentUserEmail,
 } from '../../services/ledgerApiService';
 import { exportLedgerTransactionsToCsv } from '../../services/reportService';
-import { investmentMutationError, isRupiahInvestment, netCashflow, pocketTransactions, redemptionPreview } from '../../utils/investmentAccounting';
+import { investmentDeletionError, investmentMutationError, isRupiahInvestment, netCashflow, pocketTransactions, redemptionPreview } from '../../utils/investmentAccounting';
 import { GlobalMetrics } from './GlobalMetrics';
 import { CurrencyWatchlistModal } from './CurrencyWatchlistModal';
 import { PocketGrid } from './PocketGrid';
@@ -729,9 +729,9 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
   const handleDeleteTransaction = async (id: string) => {
     const tx = transactions.find((t) => t.id === id);
     const pocket = pockets.find(p => p.id === tx?.pocketId);
-    if (pocket && isRupiahInvestment(pocket) && pocketTransactions(pocket, transactions).some(t => t.costBasisReleasedIdr !== undefined)) {
-      showToast('Penghapusan riwayat investasi dengan pencairan tercatat memerlukan rekonsiliasi.');
-      return;
+    if (pocket) {
+      const deletionError = investmentDeletionError(pocket, transactions, id);
+      if (deletionError) { showToast(deletionError); return; }
     }
     const updated = transactions.filter((t) => t.id !== id);
     const mutationTenant = effectiveEmail;

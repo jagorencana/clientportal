@@ -78,3 +78,19 @@ export function investmentMutationError(pocket: AssetPocket, transactions: Ledge
   }
   return '';
 }
+
+export function investmentDeletionError(pocket: AssetPocket, transactions: LedgerTransaction[], id: string) {
+  const rows = pocketTransactions(pocket, transactions);
+  if (!isRupiahInvestment(pocket) || !rows.some(t => t.costBasisReleasedIdr !== undefined)) return '';
+  const target = rows.find(t => t.id === id);
+  if (!target) return '';
+  const latest = [...rows].sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id)).at(-1);
+  if (latest?.id !== id) return 'Hapus mutasi terakhir kantong ini terlebih dahulu agar modal pencairan berikutnya tidak berubah.';
+  if (pocket.lastPriceUpdatedAt) {
+    const valuationDate = new Date(pocket.lastPriceUpdatedAt).toLocaleDateString('en-CA', {timeZone:'Asia/Jakarta'});
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(valuationDate) || valuationDate >= target.date) {
+      return 'Valuasi sudah diperbarui pada/setelah tanggal mutasi ini. Pembatalannya memerlukan rekonsiliasi valuasi.';
+    }
+  }
+  return '';
+}

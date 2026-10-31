@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import { computeCurrencyPocketSummary } from '../src/utils/calculator';
-import { investmentMutationError, investmentPosition, isRupiahInvestment, redemptionPreview } from '../src/utils/investmentAccounting';
+import { investmentDeletionError, investmentMutationError, investmentPosition, isRupiahInvestment, redemptionPreview } from '../src/utils/investmentAccounting';
 import type { AssetPocket, LedgerTransaction } from '../src/types/ledger';
 import { formatIdNumber, parseIdNumber } from '../src/utils/numberInput';
 import React from 'react';
@@ -88,6 +88,26 @@ test('full redemption and subsequent top-up do not resurrect the old valuation',
   near(topped.costBasisIdr, 1_000_000);
 });
 
+test('only a last mutation not included in a newer valuation can be deleted', () => {
+  const preview = redemptionPreview(pocket, history, 10_000_000);
+  const tx = {...transaction('e','2026-10-30','DEBET',10_000_000),costBasisReleasedIdr:preview.costBasisReleasedIdr};
+  const rows = [...history, tx];
+  assert.equal(investmentDeletionError(pocket, rows, tx.id),'');
+  assert.equal(gas.investmentServerDeletionError(pocket,rows,tx.id),'');
+  assert.match(investmentDeletionError(pocket,rows,'a'),/terakhir/);
+  const later = [...rows,transaction('f','2026-10-31','CREDIT',1_000_000)];
+  assert.match(investmentDeletionError(pocket,later,'e'),/terakhir/);
+  assert.match(gas.investmentServerDeletionError(pocket,later,'e'),/terakhir/);
+  assert.equal(investmentDeletionError(pocket,later,'f'),'');
+  for (const date of ['2026-10-30T10:00:00Z','2026-10-31T10:00:00Z']) {
+    const updated = {...pocket,lastPriceUpdatedAt:date};
+    assert.match(investmentDeletionError(updated,rows,'e'),/Valuasi/);
+    assert.match(gas.investmentServerDeletionError(updated,rows,'e'),/Valuasi/);
+  }
+  const otherPocket = {...transaction('f','2026-10-31','CREDIT',1),pocketId:'another'};
+  assert.equal(investmentDeletionError(pocket,[...rows,otherPocket],'e'),'');
+});
+
 test('redemption at a loss and without a manual valuation', () => {
   const lossPocket = { ...pocket, marketValue: 5_000_000, marketValueNative: 5_000_000 };
   const loss = redemptionPreview(lossPocket, history, 1_000_000);
@@ -168,6 +188,7 @@ class FakeSheet {
   cells: any[][] = [];
   constructor(public name: string) {}
   getName() { return this.name; }
+  deleteRow(row: number) { this.cells.splice(row - 1, 1); }
   getLastRow() { return this.cells.length; }
   getLastColumn() { return Math.max(0, ...this.cells.map(row => row.length)); }
   getRange(row: number, col: number, height = 1, width = 1) {
@@ -215,6 +236,12 @@ test('offline Apps Script handlers persist, reload, retry and reconcile investme
   near(serverPosition.costBasisIdr, 6_823_408 - preview.costBasisReleasedIdr);
   assert.equal(gas.handleSaveLedgerTransaction({ userEmail: 'qa@example.test', transaction: { ...tx, id: 'f' } }).success, false);
   assert.equal(gas.handleDeleteLedgerTransaction({ userEmail: 'qa@example.test', transactionId: 'a' }).success, false);
+  assert.equal(gas.handleDeleteLedgerTransaction({ userEmail: 'qa@example.test', transactionId: 'e' }).success, true);
+  const restored = gas.handleGetLedgerData({userEmail:'qa@example.test'});
+  near(gas.investmentServerPosition(restored.pockets[0],restored.transactions).marketValueIdr,10_756_482);
+  near(gas.investmentServerPosition(restored.pockets[0],restored.transactions).costBasisIdr,6_823_408);
+  assert.equal(restored.transactions.length,history.length);
+  assert.equal(gas.handleSaveLedgerTransaction(payload).success,true);
   const update = {
     userEmail: 'qa@example.test', pocketId: 'junior', manualMarketRate: 1,
     marketValue: 800_000, marketValueNative: 800_000, marketValueCurrency: 'IDR',

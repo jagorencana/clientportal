@@ -55,9 +55,8 @@ if (deletion.split(deleteMarker).length !== 2) throw new Error('Unexpected delet
 deletion = deletion.replace(deleteMarker, `    const accountingData = accountingTenantData(ss, userEmail);
     const target = accountingData.transactions.find(function(t) { return String(t.id) === transactionId; });
     const pocket = target && accountingData.pockets.find(function(p) { return String(p.id) === String(target.pocketId); });
-    if (pocket && isMoneyInvestment(pocket) && accountingData.transactions.some(function(t) {
-      return String(t.pocketId) === String(pocket.id) && hasReleasedCost(t);
-    })) return respondJson({ status: 'error', success: false, message: 'Penghapusan riwayat pencairan memerlukan rekonsiliasi.' });
+    const deletionError = pocket ? investmentServerDeletionError(pocket, accountingData.transactions, transactionId) : '';
+    if (deletionError) return respondJson({ status: 'error', success: false, message: deletionError });
     const columns = ledgerColumnIndexes(sheet);`);
 source = source.slice(0, deleteStart) + deletion + source.slice(deleteEnd);
 

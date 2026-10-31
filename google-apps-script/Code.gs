@@ -424,6 +424,21 @@ function validateInvestmentTransaction(pocket, history, tx) {
   return '';
 }
 
+function investmentServerDeletionError(pocket, transactions, id) {
+  if (!isMoneyInvestment(pocket)) return '';
+  const rows = transactions.filter(function(t) { return String(t.pocketId) === String(pocket.id || pocket.pocketId); });
+  if (!rows.some(hasReleasedCost)) return '';
+  const target = rows.find(function(t) { return String(t.id) === String(id); });
+  if (!target) return '';
+  const ordered = rows.slice().sort(function(a,b) { return String(a.date).localeCompare(String(b.date)) || String(a.id).localeCompare(String(b.id)); });
+  if (String(ordered[ordered.length-1].id) !== String(id)) return 'Hapus mutasi terakhir kantong ini terlebih dahulu agar modal pencairan berikutnya tidak berubah.';
+  if (pocket.lastPriceUpdatedAt) {
+    const valuationDate = Utilities.formatDate(new Date(pocket.lastPriceUpdatedAt), 'Asia/Jakarta', 'yyyy-MM-dd');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(valuationDate) || valuationDate >= String(target.date)) return 'Valuasi sudah diperbarui pada/setelah tanggal mutasi ini. Pembatalannya memerlukan rekonsiliasi valuasi.';
+  }
+  return '';
+}
+
 function ensureLedgerTransactionHeaders(sheet) {
   const required = [
     'id', 'userEmail', 'pocketId', 'date', 'currency', 'posCategory',
@@ -540,9 +555,8 @@ function handleDeleteLedgerTransaction(payload) {
     const target = tenantRows.find(function(tx) { return String(tx.id) === transactionId; });
     const pocketSheet = getSpreadsheet().getSheetByName('LEDGER_POCKETS');
     const targetPocket = target && readTenantLedgerRows(pocketSheet, userEmail).find(function(p) { return String(p.id) === String(target.pocketId); });
-    if (targetPocket && isMoneyInvestment(targetPocket) && tenantRows.some(function(tx) {
-      return String(tx.pocketId) === String(target.pocketId) && hasReleasedCost(tx);
-    })) return createJsonResponse({ status: 'error', success: false, message: 'Penghapusan riwayat pencairan memerlukan rekonsiliasi.' });
+    const deletionError = targetPocket ? investmentServerDeletionError(targetPocket, tenantRows, transactionId) : '';
+    if (deletionError) return createJsonResponse({ status: 'error', success: false, message: deletionError });
     const values = sheet.getDataRange().getValues();
     const headers = values[0].map(normalizeLedgerHeader);
     const emailIndex = headers.indexOf('useremail') >= 0 ? headers.indexOf('useremail') : headers.indexOf('email');

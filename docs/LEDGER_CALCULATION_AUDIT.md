@@ -42,7 +42,7 @@ Saldo mutasi (setoran dikurangi seluruh penarikan) boleh negatif setelah keuntun
 - Snapshot lama dengan transaksi pada hari yang sama atau tanpa tanggal acuan memerlukan pembaruan nilai investasi; urutan kejadian tidak ditebak.
 - Backend memeriksa saldo dan alokasi modal di bawah lock, menolak alokasi usang/penarikan berlebih, serta menerima pengulangan permintaan yang identik tanpa membuat duplikat.
 - Frontend mengaktifkan pencairan baru hanya jika pemuatan data remote mengonfirmasi `investmentAccountingVersion: 1`; cache dan backend lama tidak dianggap cukup.
-- Mutasi investasi harus berurutan. Setelah terdapat pencairan dengan modal tercatat, edit/hapus riwayat langsung diblokir karena dapat mengubah modal pencairan berikutnya. Alur koreksi/reversal memerlukan pekerjaan rekonsiliasi terpisah dan belum disediakan dalam patch ini.
+- Mutasi investasi harus berurutan. Mutasi terakhir dapat dihapus jika belum ada mutasi atau valuasi yang mencakupnya setelah transaksi tersebut. Penghapusan mengembalikan posisi melalui perhitungan ulang jurnal. Jika valuasi bertanggal sama, urutan intrahari belum dapat dipastikan sehingga rekonsiliasi tetap diperlukan. Edit/penghapusan riwayat lebih lama yang memengaruhi pencairan berikutnya masih dilindungi.
 - Penggantian jenis kantong yang akan mengubah model pencatatan setelah pencairan juga diblokir.
 - Kas, valas, emas, dan saham/ETF tetap memakai model saldo/unit yang ada.
 
