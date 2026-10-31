@@ -354,7 +354,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         <form onSubmit={handleSubmit} className="mt-4 space-y-4">
           {isInvestment && (
             <p className="text-xs text-slate-600">
-              Masukkan nominal rupiah sesuai aplikasi investasi. Nilai investasi mengikuti pembaruan terakhir dan mutasi setelahnya; konfirmasikan hasil pencairan di aplikasi.
+              Masukkan nominal rupiah sesuai aplikasi investasi. Untuk penjualan/pencairan, perbarui nilai pasar tepat sebelum pencairan agar pembagian modal dan untung/rugi sesuai. Perhitungan berbasis nominal adalah estimasi proporsional, bukan data unit/NAB dari penyedia. Jika dananya masuk ke rekening sendiri, gunakan Pindahkan antar kantong agar kedua sisi tercatat sekali.
             </p>
           )}
           {investmentError && <p role="alert" className="text-xs text-rose-600">{investmentError}</p>}
@@ -362,7 +362,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           {redemption && cleanAmount > 0 && !isOverdraft && !investmentError && (
             <div className="rounded-xl bg-teal-50 p-3 text-xs text-teal-800">
               <p>Modal yang dilepas: {formatIdr(redemption.costBasisReleasedIdr)}</p>
-              <p>Hasil investasi terealisasi: {formatIdr(redemption.realizedPnlIdr)}</p>
+              <p>Untung/rugi terealisasi (estimasi): {formatIdr(redemption.realizedPnlIdr)}</p>
+              <p className="mt-1">Dihitung otomatis setelah disimpan. Jangan catat keuntungan lagi sebagai top up. Nominal pencairan mencakup pengembalian modal dan untung/rugi.</p>
             </div>
           )}
           {/* 1. Jenis Mutasi (Masuk vs Keluar) */}
@@ -399,7 +400,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 }`}
               >
                 <ArrowUpRight className="w-4 h-4 text-rose-600" />
-                <span>Keluar / Tarik (Debet)</span>
+                <span>{isInvestment ? 'Jual / Cairkan' : 'Keluar / Tarik (Debet)'}</span>
               </button>
             </div>
           </div>

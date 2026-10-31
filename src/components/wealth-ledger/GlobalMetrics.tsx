@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { RealizedPerformance } from './RealizedPerformance';
 import { performanceGroups } from '../../utils/wealthPresentation';
 import { CurrencyPocketSummary, GlobalWealthSummary, LedgerTransaction } from '../../types/ledger';
 import { formatIdr, formatPercent } from '../../utils/formatters';
@@ -78,7 +79,6 @@ export const GlobalMetrics: React.FC<GlobalMetricsProps> = ({
 
   const performance = performanceGroups(pockets);
   const firstDate = transactions.map(t=>t.date).sort()[0];
-  const realizedDates = transactions.filter(t=>t.type==='DEBET' && t.costBasisReleasedIdr!==undefined).map(t=>t.date).sort();
   const positionDate = new Date().toLocaleDateString('id-ID',{timeZone:'Asia/Jakarta'});
   return (
     <div className="space-y-4">
@@ -110,11 +110,7 @@ export const GlobalMetrics: React.FC<GlobalMetricsProps> = ({
         <h2 className="text-sm font-bold text-slate-900">Kinerja aset, terpisah dari jumlah kekayaan</h2>
         <p className="mt-1 text-xs text-slate-500">Posisi per {positionDate}. Mutasi sejak {firstDate || 'belum ada pencatatan'}; setiap kantong memakai valuasi terakhirnya.</p>
         <p className="mt-1 text-[11px] text-slate-500">Acuan kurs: {fxUpdatedAt || 'waktu tidak tersedia'}. Saat offline dapat memakai kurs tersimpan.</p>
-        <div className="my-4 grid gap-3 sm:grid-cols-2">
-          <div className="rounded-xl bg-teal-50 p-3"><p className="text-xs">Hasil terealisasi tercatat</p><strong className="text-xl">{formatIdr(summary.totalRealizedPnlIdr || 0)}</strong><p className="text-[11px] text-slate-500">Dari pencairan yang menyimpan modal dilepas.</p></div>
-          <div className="rounded-xl bg-slate-50 p-3"><p className="text-xs">Total P/L tercatat</p><strong className="text-xl">{formatIdr(summary.totalRecordedPnlIdr ?? summary.totalUnrealizedPnlIdr)}</strong><p className="text-[11px] text-slate-500">Floating + hasil terealisasi yang tersedia; bukan persentase return portofolio.</p></div>
-        </div>
-        <p className="mb-3 text-[11px] text-amber-800">{realizedDates.length ? `Pencairan dengan modal tercatat tersedia sejak ${realizedDates[0]}.` : 'Belum ada pencairan dengan modal tercatat.'} Keuntungan terealisasi dari riwayat lama belum tentu lengkap.</p>
+        <RealizedPerformance transactions={transactions} floating={summary.totalUnrealizedPnlIdr} />
         <div className="overflow-x-auto"><table className="w-full text-xs"><thead className="text-slate-500"><tr><th className="py-2 text-left">Kelas aset</th><th className="text-right">Nilai aset</th><th className="text-right">Floating P/L</th><th className="text-right">Realized tercatat</th></tr></thead><tbody>{performance.map(row=><tr key={row.name} className="border-t border-slate-100"><td className="py-2">{row.name}</td><td className="text-right">{formatIdr(row.value)}</td><td className={`text-right ${row.floating<0?'text-rose-600':'text-emerald-700'}`}>{formatIdr(row.floating)}</td><td className="text-right">{formatIdr(row.realized)}</td></tr>)}</tbody></table></div>
       </section>
 

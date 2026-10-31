@@ -63,3 +63,14 @@ Tes mencakup FX USD seragam dengan rasio hasil investasi yang berbeda; total ase
 | Periode dan tanggal valuasi | Cut-off laporan, realized bulan terpilih, tanggal per kantong dan acuan FX | Filter tanggal, pratinjau laporan |
 
 Belum diklaim: uji tulis pada akun produksi, PDF hasil dialog cetak akun produksi, rekonstruksi realized historis yang datanya tidak ada, transfer beda mata uang/fee/unit saham, impor event transfer melalui JSON lama, atau migrasi Supabase. Perubahan ekonomi pada riwayat yang memiliki transaksi/valuasi dependen tetap memerlukan rekonsiliasi; mengedit teks tidak mengubah modal, saldo, atau hasil investasi.
+
+
+## Realized P/L interaction and disclosure
+
+Do not add a separate “realize profit” transaction. A recorded sale/redemption realizes proceeds minus released acquisition cost once; its paired incoming cash leg does not create another gain. Updating market value does not realize P/L. Ordinary cash-to-cash transfers retain acquisition basis. A redemption into an owned cash account should use the paired transfer flow rather than two unrelated entries.
+
+The dashboard and nominal-IDR investment detail show floating, recorded realized and their combined amount together, with expandable proceeds/cost/gain lines. Realized P/L is explanatory performance, not an asset to add to wealth again. Missing released-cost history displays unavailable/unclassified rather than implying zero gain. Disclosure covers all available records; no lifetime-completeness claim or portfolio-return percentage is made.
+
+The nominal-IDR method allocates cost proportionally from the reference market valuation. Users should refresh the investment value immediately before redemption and reconcile against provider statements; this is an estimate, not provider unit/NAV lot accounting. Dividends, interest, fees and taxes are not independently supported event types yet and are not represented as a complete total investment return.
+
+Validation added: a positive redemption, negative realization, incoming paired leg and unknown-cost legacy debit are distinguished without double counting. The disclosure is checked in server-rendered UI output; 25 accounting/integration/UI tests pass, along with TypeScript and build checks.

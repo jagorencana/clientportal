@@ -25,6 +25,19 @@ export function recordedRealized(transactions: LedgerTransaction[], from='', to=
   return transactions.filter(t=>t.date>=from && t.date<=to && t.type==='DEBET' &&
     t.costBasisReleasedIdr!==undefined).reduce((sum,t)=>sum+Math.abs(t.costIdr??t.totalIdr??t.nativeAmount*t.exchangeRate)-t.costBasisReleasedIdr!,0);
 }
+
+// Missing acquisition cost is unknown, not a zero gain. Incoming transfer legs
+// never realize another gain: only the disposal leg carries released cost.
+export function realizationDetails(transactions: LedgerTransaction[]) {
+  const disposals = transactions.filter(t => t.type === 'DEBET' || String(t.type) === 'OUT');
+  const rows = disposals.flatMap(t => {
+    const proceeds = Math.abs(Number(t.costIdr ?? t.totalIdr ?? t.nativeAmount * t.exchangeRate));
+    const cost = t.costBasisReleasedIdr;
+    if (cost === undefined || !Number.isFinite(cost) || cost < 0 || !Number.isFinite(proceeds)) return [];
+    return [{id:t.id,date:t.date,description:t.description,proceeds,cost,pnl:proceeds-cost}];
+  }).sort((a,b)=>b.date.localeCompare(a.date)||b.id.localeCompare(a.id));
+  return {rows, total:rows.reduce((sum,t)=>sum+t.pnl,0), unclassified:disposals.length-rows.length};
+}
 export function performanceGroups(pockets: CurrencyPocketSummary[]) {
   const groups=new Map<string,{name:string;value:number;cost:number;floating:number;realized:number}>();
   for(const p of pockets){

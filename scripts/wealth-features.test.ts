@@ -7,7 +7,8 @@ import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {prepareTransfer,transferDependencyError} from '../src/utils/ledgerTransfers';
 import {computeCurrencyPocketSummary,computeGlobalWealthSummary} from '../src/utils/calculator';
-import {reportFxRate,performanceGroups,recordedRealized,valuationInputRate} from '../src/utils/wealthPresentation';
+import {reportFxRate,performanceGroups,recordedRealized,valuationInputRate,realizationDetails} from '../src/utils/wealthPresentation';
+import {RealizedPerformance} from '../src/components/wealth-ledger/RealizedPerformance';
 import {GlobalMetrics} from '../src/components/wealth-ledger/GlobalMetrics';
 import type {AssetPocket,LedgerTransaction} from '../src/types/ledger';
 
@@ -18,6 +19,21 @@ const dest=pocket('cash');
 const deposit=(p:AssetPocket,amount:number,rate=1):LedgerTransaction=>({id:'opening-'+p.id,pocketId:p.id,date:'2026-10-21',currency:p.currencyCode,type:'CREDIT',nativeAmount:amount,exchangeRate:rate,costIdr:amount*rate,description:'Synthetic deposit',posCategory:p.name,location:'Synthetic'});
 const input=(amount=10_000_000)=>({id:'transfer-'+Date.now()+'-'+crypto.randomUUID(),fromPocketId:'fund',toPocketId:'cash',amount,date:'2026-10-31',description:'Synthetic transfer'});
 const summaries=(accounts:AssetPocket[],rows:LedgerTransaction[],rate=1)=>accounts.map(p=>computeCurrencyPocketSummary(p.currencyCode,rows,rate,p));
+
+test('realization disclosure counts a disposal once, separates a loss and unknown cost, and avoids double counting wealth',()=>{
+  const legs=prepareTransfer([source,dest],[deposit(source,6_823_408)],input());
+  const loss={...deposit(source,100),id:'loss',type:'DEBET' as const,costIdr:100,costBasisReleasedIdr:120};
+  const unknown={...loss,id:'legacy',costBasisReleasedIdr:undefined};
+  const result=realizationDetails([...legs,loss,unknown]);
+  assert.equal(result.rows.length,2,'incoming paired transfer does not realize a second gain');
+  assert.equal(result.unclassified,1,'missing cost is not a zero gain');
+  near(result.total,3_656_468.722766421-20);
+  assert.equal(result.rows.find(t=>t.id==='loss')!.pnl,-20);
+  const html=renderToStaticMarkup(React.createElement(RealizedPerformance,{transactions:[...legs,loss,unknown],floating:276_605.2772335792}));
+  assert.match(html,/Modal dilepas/);assert.match(html,/tidak ditambahkan lagi/);assert.match(html,/estimasi pembukuan/);
+  const empty=renderToStaticMarkup(React.createElement(RealizedPerformance,{transactions:[unknown],floating:0}));
+  assert.match(empty,/Belum tersedia/);assert.match(empty,/belum diklasifikasikan/);
+});
 
 test('USD pockets share one currency FX even when effective asset ratios differ',()=>{
   const accounts=[pocket('usd-cash','USD'),{...pocket('usd-stock','USD','SAHAM_ETF'),marketValue:28_438_891},
