@@ -105,6 +105,9 @@ export interface CurrencyPocketSummary {
   unrealizedPnlPercent: number;// (unrealizedPnlIdr / totalCostBasisIdr) * 100
   availableBalanceNative?: number; // IDR investments: valuation adjusted for subsequent cash movements
   realizedPnlIdr?: number;
+  valuationNeedsRefresh?: boolean;
+  adjustedMarketValueNative?: number;
+  valuationTopUpsNative?: number;
 }
 
 export interface GlobalWealthSummary {
@@ -114,6 +117,7 @@ export interface GlobalWealthSummary {
   totalUnrealizedPnlPercent: number;
   totalRealizedPnlIdr?: number;
   totalRecordedPnlIdr?: number;
+  incompleteValuationCount?: number;
 }
 
 export interface DiscrepancyDetail {

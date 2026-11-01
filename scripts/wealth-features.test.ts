@@ -20,6 +20,30 @@ const deposit=(p:AssetPocket,amount:number,rate=1):LedgerTransaction=>({id:'open
 const input=(amount=10_000_000)=>({id:'transfer-'+Date.now()+'-'+crypto.randomUUID(),fromPocketId:'fund',toPocketId:'cash',amount,date:'2026-10-31',description:'Synthetic transfer'});
 const summaries=(accounts:AssetPocket[],rows:LedgerTransaction[],rate=1)=>accounts.map(p=>computeCurrencyPocketSummary(p.currencyCode,rows,rate,p));
 
+test('USD monetary investment adds post-valuation deposits once without manufacturing deposit profit',()=>{
+  const fund={...pocket('trust','USD','REKSADANA'),marketValueNative:6308,marketValueCurrency:'USD',marketValue:110_000_000,lastPriceUpdatedAt:'2026-09-30T08:42:00Z'};
+  const opening={...deposit(fund,6244.98,17600),date:'2026-05-15'};
+  const topup={...deposit(fund,274.34,18225),id:'later',date:'2026-10-23'};
+  const old=computeCurrencyPocketSummary('USD',[opening],18132,fund);
+  const result=computeCurrencyPocketSummary('USD',[opening,topup],18132,fund);
+  near(result.marketValueIdr,(6308+274.34)*18132);
+  near(result.marketValueIdr-old.marketValueIdr,274.34*18132);
+  near(result.unrealizedPnlIdr-old.unrealizedPnlIdr,274.34*(18132-18225));
+  near(result.averageBuyRate,(6244.98*17600+274.34*18225)/(6244.98+274.34));
+  assert.equal(result.valuationNeedsRefresh,false);
+  near(result.valuationTopUpsNative!,274.34);
+  near(computeCurrencyPocketSummary('USD',[opening],18132,{...fund,marketValueNative:6308,lastPriceUpdatedAt:'2026-10-24T00:00:00Z'}).marketValueIdr,6308*18132);
+  assert.equal(computeCurrencyPocketSummary('USD',[opening,{...topup,date:'2026-09-30'}],18132,fund).valuationNeedsRefresh,true,'same-day legacy ordering is unknown');
+  const withdrawal={...topup,id:'out',type:'DEBET' as const};
+  const unclear=computeCurrencyPocketSummary('USD',[opening,withdrawal],18132,fund);
+  assert.equal(unclear.valuationNeedsRefresh,true,'redemption requires valuation reconciliation');
+  near(computeGlobalWealthSummary([unclear]).totalUnrealizedPnlIdr,0);
+  assert.equal(computeGlobalWealthSummary([unclear]).incompleteValuationCount,1);
+  const refreshed=computeCurrencyPocketSummary('USD',[opening,topup],18132,{...fund,marketValueNative:6582.34,lastPriceUpdatedAt:'2026-10-24T00:00:00Z'});
+  near(refreshed.marketValueIdr,result.marketValueIdr);
+  near(refreshed.valuationTopUpsNative!,0);
+});
+
 test('report excludes unvalued investments from performance without dropping their recorded asset value',()=>{
   const accounts=[pocket('cash','CHF'),pocket('sgov','USD','SAHAM_ETF'),pocket('stock','IDR','SAHAM_ETF'),
     {...pocket('rdpu','IDR','REKSADANA'),marketValue:20_537_999,marketValueNative:20_537_999,lastPriceUpdatedAt:'2026-10-09T00:00:00Z'}];
