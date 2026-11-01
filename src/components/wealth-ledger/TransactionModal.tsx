@@ -306,7 +306,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
               {editTransaction ? 'Ubah Transaksi' : 'Catat Mutasi Kantong'}
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              Buku besar pencatatan perpetual &middot; Moving average cost
+              {isInvestment ? 'Catat top up atau pencairan investasi' : 'Catat dana masuk atau keluar'}
             </p>
           </div>
           <button
@@ -354,16 +354,17 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         <form onSubmit={handleSubmit} className="mt-4 space-y-4">
           {isInvestment && (
             <p className="text-xs text-slate-600">
-              Masukkan nominal rupiah sesuai aplikasi investasi. Untuk penjualan/pencairan, perbarui nilai pasar tepat sebelum pencairan agar pembagian modal dan untung/rugi sesuai. Perhitungan berbasis nominal adalah estimasi proporsional, bukan data unit/NAB dari penyedia. Jika dananya masuk ke rekening sendiri, gunakan Pindahkan antar kantong agar kedua sisi tercatat sekali.
+              {type === 'DEBET' ? 'Perbarui nilai investasi sebelum mencairkan. Ke rekening sendiri? Gunakan Pindahkan antar kantong.' : 'Masukkan nominal top up sesuai aplikasi investasi.'}
             </p>
           )}
           {investmentError && <p role="alert" className="text-xs text-rose-600">{investmentError}</p>}
-          {metadataOnly && <p className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600">Edit keterangan/catatan saja: saldo, modal, dan hasil investasi tidak berubah.</p>}
+          {metadataOnly && <p className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600">Hanya mengubah catatan. Saldo tetap.</p>}
           {redemption && cleanAmount > 0 && !isOverdraft && !investmentError && (
             <div className="rounded-xl bg-teal-50 p-3 text-xs text-teal-800">
-              <p>Modal yang dilepas: {formatIdr(redemption.costBasisReleasedIdr)}</p>
-              <p>Untung/rugi terealisasi (estimasi): {formatIdr(redemption.realizedPnlIdr)}</p>
-              <p className="mt-1">Dihitung otomatis setelah disimpan. Jangan catat keuntungan lagi sebagai top up. Nominal pencairan mencakup pengembalian modal dan untung/rugi.</p>
+              <p className="flex justify-between gap-3"><span>Modal dicairkan</span><strong>{formatIdr(redemption.costBasisReleasedIdr)}</strong></p>
+              <p className="flex justify-between gap-3"><span>{redemption.realizedPnlIdr >= 0 ? 'Untung terealisasi' : 'Rugi terealisasi'}</span><strong>{formatIdr(Math.abs(redemption.realizedPnlIdr))}</strong></p>
+              <p className="mt-2 flex justify-between gap-3 border-t border-teal-100 pt-2"><span>Sisa investasi</span><strong>{formatIdr(Math.max(0,currentAvailableBalance-cleanAmount))}</strong></p>
+              <p className="mt-1">Estimasi proporsional dari valuasi terakhir. Tercatat saat disimpan.</p>
             </div>
           )}
           {/* 1. Jenis Mutasi (Masuk vs Keluar) */}
