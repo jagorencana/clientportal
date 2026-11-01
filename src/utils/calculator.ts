@@ -6,6 +6,7 @@ import {
   LedgerTransaction,
 } from '../types/ledger';
 import { investmentPosition, isRupiahInvestment, foreignInvestmentValuation } from './investmentAccounting';
+import { reportValuationKnown } from './wealthPresentation';
 
 export interface EnrichedTransaction extends LedgerTransaction {
   isCredit: boolean;
@@ -202,11 +203,13 @@ export function computeGlobalWealthSummary(
     totalCostBasisIdr += p.totalCostBasisIdr || 0;
   });
 
-  const covered=pockets.filter(p=>!p.valuationNeedsRefresh);
-  const coveredCost=covered.reduce((sum,p)=>sum+p.totalCostBasisIdr,0);
-  const totalUnrealizedPnlIdr = covered.reduce((sum,p)=>sum+p.unrealizedPnlIdr,0);
+  // Headline wealth, cost and P/L must have identical scope. Quality coverage
+  // is a separate breakdown, never a silent exclusion from the headline.
+  const covered=pockets.filter(p=>reportValuationKnown(p));
+  const coveredUnrealizedPnlIdr=covered.reduce((sum,p)=>sum+p.marketValueIdr-p.totalCostBasisIdr,0);
+  const totalUnrealizedPnlIdr = totalNetWorthIdr-totalCostBasisIdr;
   const totalUnrealizedPnlPercent =
-    coveredCost > 0 ? (totalUnrealizedPnlIdr / coveredCost) * 100 : 0;
+    totalCostBasisIdr > 0 ? (totalUnrealizedPnlIdr / totalCostBasisIdr) * 100 : 0;
 
   return {
     totalNetWorthIdr,
@@ -215,6 +218,8 @@ export function computeGlobalWealthSummary(
     totalUnrealizedPnlPercent,
     totalRealizedPnlIdr: pockets.reduce((sum,p) => sum + (p.realizedPnlIdr || 0),0),
     totalRecordedPnlIdr: totalUnrealizedPnlIdr + pockets.reduce((sum,p) => sum + (p.realizedPnlIdr || 0),0),
-    incompleteValuationCount:pockets.filter(p=>p.valuationNeedsRefresh).length,
+    incompleteValuationCount:pockets.filter(p=>!reportValuationKnown(p)&&(p.marketValueIdr!==0||p.totalCostBasisIdr!==0)).length,
+    coveredUnrealizedPnlIdr,
+    estimatedUnrealizedPnlIdr:totalUnrealizedPnlIdr-coveredUnrealizedPnlIdr,
   };
 }

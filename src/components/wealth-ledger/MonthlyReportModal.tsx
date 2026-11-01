@@ -141,9 +141,9 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
     });
 
     const coverage=reportPerformanceCoverage(items);
-    const floatingPnl = coverage.floating;
+    const floatingPnl = totalMarketValue-totalCostBasis;
     const floatingPnlPercent =
-      coverage.percent;
+      totalCostBasis>0 ? floatingPnl/totalCostBasis*100 : 0;
 
     return {
       items,
@@ -206,7 +206,6 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
   const monthlyNet = monthlyInflow - monthlyOutflow;
   const realizedInPeriod = recordedRealized(transactions,firstDayDateStr,cutOffDateStr);
   const realizedToCutoff = recordedRealized(transactions,'',cutOffDateStr);
-  const cutoffRealizations=realizationDetails(transactions.filter(t=>t.date<=cutOffDateStr));
   const periodRealizations=realizationDetails(transactions.filter(t=>t.date>=firstDayDateStr&&t.date<=cutOffDateStr));
 
   const handlePrint = () => {
@@ -365,7 +364,7 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                 {/* Metrik 3: Floating Profit/Loss */}
                 <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg">
                   <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider flex items-center justify-between font-sans">
-                    <span>{historicalData.coverage.missing ? 'Floating P/L · Aset Tervaluasi' : 'Floating Profit / Loss'}</span>
+                    <span>{historicalData.coverage.missing ? 'Selisih Nilai − Modal · Estimasi' : 'Floating Profit / Loss'}</span>
                     {historicalData.floatingPnl >= 0 ? (
                       <TrendingUp className="w-3 h-3 text-emerald-600" />
                     ) : (
@@ -377,20 +376,20 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                       historicalData.floatingPnl >= 0 ? 'text-emerald-700' : 'text-rose-700'
                     }`}
                   >
-                    {historicalData.coverage.known ? formatIdr(historicalData.floatingPnl) : 'Belum tersedia'}
+                    {formatIdr(historicalData.floatingPnl)}
                   </div>
                   <div
                     className={`text-[10px] font-bold font-sans tabular-nums mt-0.5 ${
                       historicalData.floatingPnl >= 0 ? 'text-emerald-700' : 'text-rose-700'
                     }`}
                   >
-                    Selisih / modal aset tervaluasi: {historicalData.coverage.known ? formatPercent(historicalData.floatingPnlPercent) : '—'}
+                    Selisih / modal seluruh aset: {formatPercent(historicalData.floatingPnlPercent)}
                   </div>
                 </div>
               </div>
               <div className="mt-3 grid grid-cols-2 gap-3 text-[10px]">
                 <div className="rounded-lg border border-slate-200 p-3"><div>Hasil terealisasi tercatat · {periodLabel}</div><strong className="text-sm">{periodRealizations.rows.length ? formatIdr(realizedInPeriod) : 'Belum tersedia'}</strong></div>
-                <div className="rounded-lg border border-slate-200 p-3"><div>Total P/L tercakup hingga cut-off</div><strong className="text-sm">{historicalData.coverage.known || cutoffRealizations.rows.length ? formatIdr(historicalData.floatingPnl+realizedToCutoff) : 'Belum tersedia'}</strong><p>Floating aset tervaluasi + realisasi tercatat. Bukan total hasil investasi lengkap; dividen/bunga belum diklasifikasikan sebagai pendapatan.</p></div>
+                <div className="rounded-lg border border-slate-200 p-3"><div>Total P/L tercatat hingga cut-off</div><strong className="text-sm">{formatIdr(historicalData.floatingPnl+realizedToCutoff)}</strong><p>Selisih seluruh aset−modal + realisasi tercatat. Sebagian valuasi mungkin estimasi; dividen/bunga terpisah belum tercakup.</p></div>
               </div>
             </div>
 
@@ -403,7 +402,8 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                 <strong>{positionBasisLabel}.</strong> Saldo menggunakan transaksi hingga tanggal tersebut. Nilai pasar memakai NAB/manual market value terakhir dan kurs spot pada saat laporan dicetak, karena histori harga pasar harian belum disimpan.
                 <p>Kurs FX menggunakan satu acuan per mata uang, terpisah dari kenaikan/penurunan nilai investasi. Kurs transaksi historis tetap mengikuti jurnal dan dapat berbeda. {fxUpdatedAt ? `Acuan kurs diperbarui: ${fxUpdatedAt}.` : 'Waktu acuan kurs tidak tersedia.'}</p>
               </div>
-              {historicalData.coverage.missing>0 && <p className="mb-2 rounded-lg bg-amber-50 p-2 text-[10px] text-amber-900">{historicalData.coverage.missing} aset belum memiliki valuasi bertanggal hingga cut-off. Nilainya memakai angka tercatat/perkiraan dan tetap masuk alokasi, tetapi dikeluarkan dari floating P/L. Perbarui nilai pasar di detail kantong. Valuasi lama memakai tanggal yang tertera; ini bukan return periode atau laporan harga historis.</p>}
+              {historicalData.coverage.missing>0 && <p className="mb-2 rounded-lg bg-amber-50 p-2 text-[10px] text-amber-900">{historicalData.coverage.missing} aset belum memiliki valuasi bertanggal hingga cut-off. Nilainya memakai angka tercatat/perkiraan dan tetap masuk seluruh total, termasuk selisih nilai−modal. Perbarui nilai pasar di detail kantong. Valuasi lama memakai tanggal yang tertera; ini bukan return periode atau laporan harga historis.</p>}
+              {historicalData.coverage.missing>0 && <p className="mb-2 text-[10px] text-slate-600">* Mencakup estimasi. Rekonsiliasi: acuan tersedia {formatIdr(historicalData.coverage.floating)} + bagian estimasi {formatIdr(historicalData.floatingPnl-historicalData.coverage.floating)} = {formatIdr(historicalData.floatingPnl)}.</p>}
               <div className="report-asset-table w-full border border-slate-200 rounded-lg overflow-hidden">
                 <table className="w-full text-left text-[10px] border-collapse table-fixed">
                   <thead>
@@ -429,7 +429,7 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                             {historicalData.totalMarketValue > 0 ? `${((group.total / historicalData.totalMarketValue) * 100).toFixed(1)}%` : '0.0%'}
                           </td>
                           <td className="px-1 py-1.5 text-right font-semibold whitespace-nowrap">
-                            {group.coverage.missing ? 'Belum lengkap' : group.coverage.cost > 0 ? formatPercent(group.coverage.percent) : '—'}
+                            {group.cost>0 ? formatPercent((group.total-group.cost)/group.cost*100) : '—'}{group.coverage.missing ? '*' : ''}
                           </td>
                         </tr>
                         {group.items.map((p) => {
@@ -495,7 +495,7 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                         {historicalData.totalMarketValue > 0 ? '100.0%' : '0.0%'}
                       </td>
                       <td className="py-2.5 px-1 text-right tabular-nums whitespace-nowrap">
-                        {historicalData.coverage.missing ? 'Belum lengkap' : historicalData.coverage.cost > 0 ? formatPercent(historicalData.floatingPnlPercent) : '—'}
+                        {historicalData.totalCostBasis>0 ? formatPercent(historicalData.floatingPnlPercent) : '—'}{historicalData.coverage.missing ? '*' : ''}
                       </td>
                     </tr>
                   </tfoot>

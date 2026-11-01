@@ -15,7 +15,7 @@ export function reportFxRate(p: CurrencyPocketSummary, rates: Record<string,numb
   return Number.isFinite(rate) && rate! > 0 ? rate : undefined;
 }
 
-export function reportValuationKnown(p:CurrencyPocketSummary,cutoff:string) {
+export function reportValuationKnown(p:CurrencyPocketSummary,cutoff=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Jakarta'})) {
   if(p.valuationNeedsRefresh)return false;
   if(p.instrumentType==='CASH_VALAS') return Number.isFinite(p.fxRateToIdr) && p.fxRateToIdr!>0;
   const hasValue=[p.manualMarketValue,p.manualMarketValueNative,p.manualMarketRate].some(v=>Number.isFinite(v)&&v!>0);
@@ -59,7 +59,8 @@ export function performanceGroups(pockets: CurrencyPocketSummary[]) {
     const name=performanceClass(p);
     const row=groups.get(name)||{name,value:0,cost:0,floating:0,realized:0,covered:0,missing:0};
     row.value+=p.marketValueIdr;row.cost+=p.totalCostBasisIdr;
-    if(!p.valuationNeedsRefresh){row.floating+=p.unrealizedPnlIdr;row.covered++;}else{row.missing++;}
+    row.floating+=p.marketValueIdr-p.totalCostBasisIdr;
+    if(reportValuationKnown(p)){row.covered++;}else if(p.marketValueIdr!==0||p.totalCostBasisIdr!==0){row.missing++;}
     row.realized+=p.realizedPnlIdr||0;groups.set(name,row);
   }
   return [...groups.values()];
