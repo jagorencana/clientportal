@@ -106,3 +106,12 @@ Regression fixture from the reported numbers: assets Rp632,581,626 minus cost Rp
 Use Nilai Aset, Modal Tersisa, Laba/Rugi Belum Dicairkan, Laba/Rugi Pencairan and Total Hasil consistently in summary, detail and report labels. The arithmetic is unchanged. A single short notice explains holdings needing price refresh. Remove duplicate coverage reconciliation UI; keep its arithmetic regression tests. Do not display all ordinary cash outflows as an unresolved investment-realization count. Unknown realization remains explicitly unavailable, and brief data/estimate/dividend/fee limitations remain visible.
 
 The latest screenshot fixture also reconciles Rp633,217,153 assets minus Rp630,183,233 remaining cost to Rp3,033,920, plus Rp3,656,469 realization equals Rp6,690,389. Class sums match the same totals.
+
+
+## Current-month movement highlights
+
+Replace the estimated budget-capacity tile with actual current-month journal inflow, outflow and their difference. Render two directly visible lists of the five largest incoming and outgoing movements, showing description, transaction date, pocket and historical IDR value. Monthly totals/counts include all valid movements, not only the top five. Rank converted historical transaction amounts rather than native currency amounts or current FX.
+
+Use the Asia/Jakarta calendar, month start through today; exclude future dates and other months. Exclude tagged internal-transfer legs (transferId/transferLeg). Older manually entered transfers without pairing metadata cannot be inferred and continue to follow their journal classification. Cash outflow includes investment redemptions and is not labelled household spending or investment loss. Missing/invalid amounts are excluded with a visible count. Empty states remain visible, with no extra clicks. No new persistent data or Apps Script changes.
+
+30 tests, TypeScript and production build pass, including timezone rollover, historical FX ranking, more than five movements with whole-month totals, future-date exclusion, paired transfers, source-order preservation and empty-list rendering.

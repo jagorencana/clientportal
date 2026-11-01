@@ -9,6 +9,8 @@ import {prepareTransfer,transferDependencyError} from '../src/utils/ledgerTransf
 import {computeCurrencyPocketSummary,computeGlobalWealthSummary} from '../src/utils/calculator';
 import {reportFxRate,performanceGroups,recordedRealized,valuationInputRate,realizationDetails,reportValuationKnown,reportPerformanceCoverage} from '../src/utils/wealthPresentation';
 import {RealizedPerformance} from '../src/components/wealth-ledger/RealizedPerformance';
+import {MonthlyHighlights} from '../src/components/wealth-ledger/MonthlyHighlights';
+import {monthlyMovements} from '../src/utils/monthlyMovements';
 import {GlobalMetrics} from '../src/components/wealth-ledger/GlobalMetrics';
 import type {AssetPocket,LedgerTransaction} from '../src/types/ledger';
 
@@ -19,6 +21,42 @@ const dest=pocket('cash');
 const deposit=(p:AssetPocket,amount:number,rate=1):LedgerTransaction=>({id:'opening-'+p.id,pocketId:p.id,date:'2026-10-21',currency:p.currencyCode,type:'CREDIT',nativeAmount:amount,exchangeRate:rate,costIdr:amount*rate,description:'Synthetic deposit',posCategory:p.name,location:'Synthetic'});
 const input=(amount=10_000_000)=>({id:'transfer-'+Date.now()+'-'+crypto.randomUUID(),fromPocketId:'fund',toPocketId:'cash',amount,date:'2026-10-31',description:'Synthetic transfer'});
 const summaries=(accounts:AssetPocket[],rows:LedgerTransaction[],rate=1)=>accounts.map(p=>computeCurrencyPocketSummary(p.currencyCode,rows,rate,p));
+
+test('monthly top five uses Jakarta calendar, excludes future/paired transfer legs and totals all rows',()=>{
+  const incoming=Array.from({length:7},(_,i)=>({...deposit(dest,(i+1)*100),id:`in-${i}`,date:'2026-11-01',description:`Incoming ${i}`}));
+  const outgoing=Array.from({length:6},(_,i)=>({...deposit(dest,(i+1)*10),id:`out-${i}`,date:'2026-11-01',type:'DEBET' as const,costIdr:-(i+1)*10}));
+  const transfer={...incoming[0],id:'paired-in',nativeAmount:99_000_000,costIdr:99_000_000,transferId:'internal'};
+  const rows=[...incoming,...outgoing,transfer,{...transfer,id:'paired-out',type:'DEBET' as const},
+    {...incoming[0],id:'last-month',date:'2026-10-31'}, {...incoming[0],id:'future',date:'2026-11-02'},
+    {...incoming[0],id:'invalid',costIdr:NaN}];
+  const original=rows.map(t=>t.id);
+  const data=monthlyMovements(rows,new Date('2026-10-31T17:00:00Z'));
+  assert.equal(data.period,'November 2026');assert.equal(data.today,'2026-11-01');
+  assert.equal(data.countIn,7);assert.equal(data.countOut,6);assert.equal(data.transfers,2);assert.equal(data.invalid,1);
+  near(data.totalIn,2800);near(data.totalOut,210);near(data.net,2590);
+  assert.deepEqual(data.topIn.map(r=>r.transaction.id),['in-6','in-5','in-4','in-3','in-2']);
+  assert.deepEqual(data.topOut.map(r=>r.transaction.id),['out-5','out-4','out-3','out-2','out-1']);
+  assert.deepEqual(rows.map(t=>t.id),original,'ranking must not reorder the source journal');
+  const beforeMidnight=monthlyMovements(rows,new Date('2026-10-31T16:59:59Z'));
+  assert.equal(beforeMidnight.countIn,1);assert.equal(beforeMidnight.topIn[0].transaction.id,'last-month');
+  const html=renderToStaticMarkup(React.createElement(MonthlyHighlights,{data,pockets:summaries([dest],[])}));
+  assert.match(html,/5 Dana Masuk Terbesar/);assert.match(html,/5 Dana Keluar Terbesar/);
+  assert.match(html,/Rp 2.800/);assert.match(html,/cash/);assert.doesNotMatch(html,/Incoming 0|<details/);
+});
+
+test('monthly ranking compares historical IDR amounts, supports legacy amounts, and has clear empty states',()=>{
+  const usd=pocket('usd','USD');
+  const expensive={...deposit(usd,100,17000),id:'expensive',date:'2026-11-01'};
+  const cheap={...deposit(dest,1000),id:'cheap',date:'2026-11-01'};
+  const alias={...cheap,id:'alias',type:'IN',costIdr:undefined,totalIdr:250_000} as unknown as LedgerTransaction;
+  const data=monthlyMovements([cheap,alias,expensive],new Date('2026-11-01T00:00:00Z'));
+  assert.deepEqual(data.topIn.map(r=>r.transaction.id),['expensive','alias','cheap']);
+  near(data.totalIn,1_951_000);
+  const empty=monthlyMovements([],new Date('2026-11-01T00:00:00Z'));
+  near(empty.net,0);
+  const html=renderToStaticMarkup(React.createElement(MonthlyHighlights,{data:empty,pockets:[]}));
+  assert.match(html,/Belum ada dana masuk bulan ini/);assert.match(html,/Belum ada dana keluar bulan ini/);
+});
 
 test('USD monetary investment adds post-valuation deposits once without manufacturing deposit profit',()=>{
   const fund={...pocket('trust','USD','REKSADANA'),marketValueNative:6308,marketValueCurrency:'USD',marketValue:110_000_000,lastPriceUpdatedAt:'2026-09-30T08:42:00Z'};
