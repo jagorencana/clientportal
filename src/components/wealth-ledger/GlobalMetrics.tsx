@@ -1,4 +1,6 @@
 import React, { useMemo } from 'react';
+import { MonthlyHighlights } from './MonthlyHighlights';
+import { monthlyMovements } from '../../utils/monthlyMovements';
 import { RealizedPerformance } from './RealizedPerformance';
 import { performanceGroups } from '../../utils/wealthPresentation';
 import { CurrencyPocketSummary, GlobalWealthSummary, LedgerTransaction } from '../../types/ledger';
@@ -43,21 +45,10 @@ export const GlobalMetrics: React.FC<GlobalMetricsProps> = ({
   pocketsCount,
   pockets,
   transactions = [],
-  monthlySurplusCapacity,
   fxUpdatedAt,
 }) => {
   const isPnlPositive = summary.totalUnrealizedPnlIdr >= 0;
-  const capacityLimit = monthlySurplusCapacity ?? 15511915;
-  const currentMonth = new Date().toISOString().slice(0, 7);
-  const monthlyAllocated = transactions
-    .filter((transaction) => {
-      const isIncoming = transaction.type === 'CREDIT' || String(transaction.type) === 'IN';
-      if (!isIncoming || transaction.transferId || !transaction.date?.startsWith(currentMonth)) return false;
-      const description = `${transaction.description || ''} ${transaction.notes || ''} ${transaction.posCategory || ''}`.toLowerCase();
-      return !description.includes('saldo awal') && !description.includes('initial') && !description.includes('migrasi');
-    })
-    .reduce((total, transaction) => total + Math.abs(Number(transaction.costIdr || transaction.totalIdr || 0)), 0);
-  const remainingCapacity = Math.max(0, capacityLimit - monthlyAllocated);
+  const movements=monthlyMovements(transactions);
   const allocations = useMemo(() => {
     const totals: Record<AllocationKey, number> = {
       CASH_VALAS: 0,
@@ -96,15 +87,13 @@ export const GlobalMetrics: React.FC<GlobalMetricsProps> = ({
           <div><div className={`text-xl font-bold tabular-nums tracking-tight ${isPnlPositive ? 'text-emerald-600' : 'text-rose-600'}`}>{formatIdr(summary.totalUnrealizedPnlIdr)}</div><p className={`mt-1 text-[11px] font-bold ${isPnlPositive ? 'text-emerald-700' : 'text-rose-700'}`}>{formatPercent(summary.totalUnrealizedPnlPercent)} · Seluruh aset − modal tersisa</p></div>
         </div>
         <div className="flex min-h-[142px] flex-col justify-between rounded-2xl border border-slate-200/80 bg-white p-4 shadow-xs">
-          <div className="flex items-start justify-between gap-3"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Sisa Anggaran Investasi</span><span className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-50 text-sm">💡</span></div>
-          <div className="my-3"><div className="whitespace-nowrap text-xl font-bold tabular-nums tracking-tight text-slate-900">{formatIdr(remainingCapacity)}</div><p className="mt-1 text-[11px] text-slate-400">Anggaran tersisa bulan ini</p></div>
-          <div className="space-y-1 border-t border-slate-100 pt-2 text-[10px] tabular-nums text-slate-500">
-            <div className="flex justify-between gap-2"><span>Plafon</span><strong className="whitespace-nowrap text-slate-700">{formatIdr(capacityLimit)}</strong></div>
-            <div className="flex justify-between gap-2"><span>Terpakai</span><strong className="whitespace-nowrap text-slate-700">{formatIdr(monthlyAllocated)}</strong></div>
-            <div className="flex justify-between gap-2 text-emerald-700"><span>Sisa anggaran</span><strong className="whitespace-nowrap">{formatIdr(remainingCapacity)}</strong></div>
-          </div>
+          <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Arus Dana Bulan Ini</span>
+          <div className="my-3"><div className={`text-xl font-bold tabular-nums ${movements.net<0?'text-rose-600':'text-emerald-700'}`}>{formatIdr(movements.net)}</div><p className="mt-1 text-[11px] text-slate-500">Dana masuk − dana keluar · {movements.period}</p></div>
+          <div className="space-y-1 border-t border-slate-100 pt-2 text-[11px] tabular-nums"><div className="flex justify-between gap-2"><span className="text-slate-500">Masuk</span><strong className="text-emerald-700">{formatIdr(movements.totalIn)}</strong></div><div className="flex justify-between gap-2"><span className="text-slate-500">Keluar</span><strong className="text-rose-700">{formatIdr(movements.totalOut)}</strong></div></div>
         </div>
       </section>
+
+      <MonthlyHighlights data={movements} pockets={pockets} />
 
       <section aria-label="Kinerja per kelas aset" className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
         <h2 className="text-sm font-bold text-slate-900">Ringkasan Hasil Investasi</h2>
