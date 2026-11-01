@@ -182,7 +182,7 @@ export const PocketCard: React.FC<PocketCardProps> = ({
           </div>
 
           {/* Return Pill */}
-          {(pocket.currency !== 'IDR' || supportsManualValuation) &&
+          {!pocket.valuationNeedsRefresh && (pocket.currency !== 'IDR' || supportsManualValuation) &&
           ((pocket.totalCostBasisIdr || 0) > 0 || (pocket.balanceNative || 0) > 0) &&
           Math.abs(pnlPercent) >= 0.01 ? (
             <span

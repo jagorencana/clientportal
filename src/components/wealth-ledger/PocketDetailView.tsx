@@ -88,19 +88,21 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
     marketValueDraftPocketRef.current = pocket.pocketId;
     setMarketValueSaveError('');
     setMarketValueInput(
-      pocket.manualMarketValueNative !== undefined
+      pocket.adjustedMarketValueNative !== undefined
+        ? formatIdNumber(pocket.adjustedMarketValueNative,0,2)
+        : pocket.manualMarketValueNative !== undefined
         ? formatIdNumber(pocket.manualMarketValueNative, 0, 2)
         : pocket.manualMarketValue !== undefined || pocket.manualMarketRate
         ? formatIdNumber(isForeignMarketValue
-            ? Number((pocket.marketValueIdr / Math.max(pocket.currentMarketRate, 1)).toFixed(2))
+            ? Number((pocket.marketValueIdr / Math.max(pocket.fxRateToIdr || pocket.currentMarketRate, 1)).toFixed(2))
             : Math.round(pocket.marketValueIdr), 0, 2)
         : ''
     );
-  }, [isMarketValueModalOpen, pocket.pocketId, pocket.manualMarketRate, pocket.manualMarketValue, pocket.manualMarketValueNative, pocket.marketValueIdr, pocket.currentMarketRate, isForeignMarketValue]);
+  }, [isMarketValueModalOpen, pocket.pocketId, pocket.manualMarketRate, pocket.manualMarketValue, pocket.manualMarketValueNative, pocket.marketValueIdr, pocket.currentMarketRate, isForeignMarketValue, pocket.adjustedMarketValueNative]);
 
   const parsedMarketInput = parseIdNumber(marketValueInput);
   const previewMarketValue = isForeignMarketValue
-    ? parsedMarketInput * pocket.currentMarketRate
+    ? parsedMarketInput * (pocket.fxRateToIdr || pocket.currentMarketRate)
     : parsedMarketInput;
   const valuationDenominator = isInvestment ? pocket.totalCostBasisIdr : pocket.balanceNative;
   const previewMarketRate = valuationDenominator > 0
@@ -252,7 +254,7 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
                   ≈ {formatIdr(pocket.marketValueIdr)}
                 </span>
                 <span className="text-xs text-slate-400">(Nilai Pasar IDR)</span>
-                {isIdr && !supportsManualValuation ? null : (
+                {pocket.valuationNeedsRefresh || (isIdr && !supportsManualValuation) ? null : (
                   <span
                     className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-xs font-bold font-sans tabular-nums ${
                       isPnlPositive
@@ -309,6 +311,9 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
             </div>
           </div>
 
+          {pocket.valuationNeedsRefresh && <p className="mb-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-900">Valuasi belum dapat disesuaikan dengan riwayat mutasi. Perbarui total nilai investasi sesuai aplikasi; untung/rugi sementara tidak ditampilkan.</p>}
+          {!!pocket.valuationTopUpsNative && <p className="mb-3 text-xs text-slate-600">Valuasi acuan + top up setelahnya: {pocket.valuationTopUpsNative.toLocaleString('id-ID',{maximumFractionDigits:2})} {pocket.currency}. Nilai kini estimasi; perubahan harga setelah valuasi belum termasuk.</p>}
+          {pocket.currency!=='IDR' && pocket.instrumentType!=='CASH_VALAS' && pocket.fxRateToIdr && <p className="mb-3 text-xs text-slate-600">Kurs FX: Rp {formatRate(pocket.fxRateToIdr,pocket.currency)} · Ekuivalen saldo tercatat: {formatIdr(pocket.balanceNative*pocket.fxRateToIdr)}. Harga investasi dapat berbeda.</p>}
           {/* 4 Mini Statistics Cards in Grid */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 pt-5 border-t border-slate-200/80">
             {/* 1. Kurs Rata-Rata */}
@@ -382,14 +387,14 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
                   isPnlPositive ? 'text-emerald-700' : 'text-rose-700'
                 }`}
               >
-                {formatIdr(pocket.unrealizedPnlIdr)}
+                {pocket.valuationNeedsRefresh ? 'Perbarui valuasi' : formatIdr(pocket.unrealizedPnlIdr)}
               </div>
               <div
                 className={`text-[10px] font-semibold font-sans tabular-nums mt-0.5 ${
                   isPnlPositive ? 'text-emerald-700' : 'text-rose-700'
                 }`}
               >
-                Return: {formatPercent(pocket.unrealizedPnlPercent)}
+                {pocket.valuationNeedsRefresh ? 'Nilai acuan belum cukup untuk menghitung hasil' : `Selisih / modal: ${formatPercent(pocket.unrealizedPnlPercent)}`}
               </div>
             </div>
           </div>

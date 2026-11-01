@@ -16,6 +16,24 @@ export function netCashflow(transactions: LedgerTransaction[]) {
     (t.type === 'CREDIT' || (t.type as string) === 'IN' ? 1 : -1) * Number(t.nativeAmount ?? t.amount ?? 0), 0);
 }
 
+// Money-denominated foreign investments are not unit-priced holdings. A later
+// deposit increases their value; it must not merely increase acquisition cost.
+export function foreignInvestmentValuation(pocket:AssetPocket,rows:LedgerTransaction[],fx:number) {
+  const applies=pocket.currencyCode!=='IDR' && ['REKSADANA','SINKING_FUND'].includes(pocket.instrumentType);
+  if(!applies)return null;
+  const value=Number(pocket.marketValueNative);
+  const currency=String(pocket.marketValueCurrency||pocket.currencyCode).toUpperCase();
+  const day=pocket.lastPriceUpdatedAt ? new Date(pocket.lastPriceUpdatedAt).toLocaleDateString('en-CA',{timeZone:'Asia/Jakarta'}) : '';
+  const dated=/^\d{4}-\d{2}-\d{2}$/.test(day);
+  const later=dated?rows.filter(t=>t.date>day):[];
+  const credit=(t:LedgerTransaction)=>t.type==='CREDIT'||String(t.type)==='IN';
+  const needsRefresh=!dated || !Number.isFinite(value)||value<=0 || currency!==pocket.currencyCode || fx<=0 ||
+    rows.some(t=>t.date===day) || later.some(t=>!credit(t));
+  if(needsRefresh)return {needsRefresh:true,marketValueIdr:undefined,adjustedNative:undefined,addedNative:0};
+  const addedNative=later.reduce((sum,t)=>sum+Number(t.nativeAmount??t.amount??0),0);
+  return {needsRefresh:false,marketValueIdr:(value+addedNative)*fx,adjustedNative:value+addedNative,addedNative};
+}
+
 export function investmentPosition(pocket: AssetPocket, transactions: LedgerTransaction[]) {
   const rows = pocketTransactions(pocket, transactions);
   const cashflow = netCashflow(rows);

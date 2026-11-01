@@ -161,7 +161,7 @@ export const PocketBanner: React.FC<PocketBannerProps> = ({
               isPnlPositive ? 'text-emerald-700' : 'text-rose-700'
             }`}
           >
-            {formatIdr(pocket.unrealizedPnlIdr)}
+            {pocket.valuationNeedsRefresh ? 'Perbarui valuasi' : formatIdr(pocket.unrealizedPnlIdr)}
           </div>
           <div
             className={`mt-1 text-[11px] font-semibold border-t pt-1.5 flex items-center justify-between ${
@@ -172,7 +172,7 @@ export const PocketBanner: React.FC<PocketBannerProps> = ({
           >
             <span>Return (%)</span>
             <span className="font-sans tabular-nums font-bold">
-              {formatPercent(pocket.unrealizedPnlPercent)}
+              {pocket.valuationNeedsRefresh ? '—' : formatPercent(pocket.unrealizedPnlPercent)}
             </span>
           </div>
         </div>

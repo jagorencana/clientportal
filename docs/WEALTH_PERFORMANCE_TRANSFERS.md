@@ -83,3 +83,12 @@ Monthly-report asset totals retain recorded estimates so unvalued holdings do no
 Realizations without released-cost records display unavailable, not an asserted zero. The report explicitly excludes unclassified dividend/interest income from its completeness claim. Pocket names never automatically generate income or alter transaction classification. No historical transactions or provider prices are fabricated. Users still need to supply current investment valuations and reconcile source records.
 
 Coverage tests check cash FX, unvalued USD/IDR investments, dated manual valuations, future/undated valuations, and preservation of asset totals while excluding unknown performance. 26 tests, TypeScript and production build pass.
+
+
+## Foreign money-denominated investment top-ups
+
+For non-IDR REKSADANA/SINKING_FUND pockets with a native-currency manual valuation and an unambiguous date, later deposits increase the native snapshot before conversion at current currency FX. A deposit increases cost by its actual historical IDR cost, not by its current converted value. Repeated calculations do not mutate the snapshot or double-add deposits. Saving a later valuation absorbs earlier deposits. Unit-based shares/gold are excluded from this nominal-money rule.
+
+Missing or mismatched snapshot currency/date, same-day transactions with unknown ordering, later withdrawals, and unavailable FX require valuation refresh instead of inventing a return. These flagged pockets retain their last estimate in wealth but do not contribute to aggregate performance; dashboard, cards and report disclose incomplete coverage. The valuation form uses canonical FX and pre-fills the adjusted native amount. This change does not invent current SGOV prices or dividend income and does not change persisted transactions.
+
+27 tests pass, including post-snapshot USD deposits, FX-only change on added capital, repeated/current snapshot handling, same-day ambiguity and withdrawal exclusion. TypeScript and production build pass. Frontend-only; no Apps Script deployment required.

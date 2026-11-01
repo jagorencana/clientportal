@@ -5,7 +5,7 @@ import {
   GlobalWealthSummary,
   LedgerTransaction,
 } from '../types/ledger';
-import { investmentPosition, isRupiahInvestment } from './investmentAccounting';
+import { investmentPosition, isRupiahInvestment, foreignInvestmentValuation } from './investmentAccounting';
 
 export interface EnrichedTransaction extends LedgerTransaction {
   isCredit: boolean;
@@ -106,13 +106,14 @@ export function computeCurrencyPocketSummary(
   const nativeMarketValueIdr = storedMarketCurrency === 'IDR'
     ? storedNativeMarketValue
     : currentMarketRate > 0 ? storedNativeMarketValue * currentMarketRate : hasStoredMarketValue ? storedMarketValue : totalCostBasisIdr;
-  const marketValueIdr = investment ? investment.marketValueIdr : supportsManualValuation && hasStoredNativeMarketValue
+  const foreignValuation=foreignInvestmentValuation(pocket,pocketTxs,currentMarketRate);
+  const marketValueIdr = foreignValuation?.marketValueIdr ?? (investment ? investment.marketValueIdr : supportsManualValuation && hasStoredNativeMarketValue
     ? nativeMarketValueIdr
     : supportsManualValuation && hasStoredMarketValue
       ? storedMarketValue
     : calculatedMarketValue > 0
       ? calculatedMarketValue
-      : totalCostBasisIdr;
+      : totalCostBasisIdr);
   const unrealizedPnlIdr = marketValueIdr - totalCostBasisIdr;
   const unrealizedPnlPercent =
     totalCostBasisIdr > 0 ? (unrealizedPnlIdr / totalCostBasisIdr) * 100 : 0;
@@ -132,6 +133,9 @@ export function computeCurrencyPocketSummary(
     balanceNative,
     availableBalanceNative: investment ? Math.max(0, investment.marketValueIdr) : balanceNative,
     realizedPnlIdr: investment?.realizedPnlIdr,
+    valuationNeedsRefresh:foreignValuation?.needsRefresh,
+    adjustedMarketValueNative:foreignValuation?.adjustedNative,
+    valuationTopUpsNative:foreignValuation?.addedNative,
     totalCostBasisIdr,
     averageBuyRate,
     currentMarketRate: effectiveSpotRate,
@@ -198,9 +202,11 @@ export function computeGlobalWealthSummary(
     totalCostBasisIdr += p.totalCostBasisIdr || 0;
   });
 
-  const totalUnrealizedPnlIdr = totalNetWorthIdr - totalCostBasisIdr;
+  const covered=pockets.filter(p=>!p.valuationNeedsRefresh);
+  const coveredCost=covered.reduce((sum,p)=>sum+p.totalCostBasisIdr,0);
+  const totalUnrealizedPnlIdr = covered.reduce((sum,p)=>sum+p.unrealizedPnlIdr,0);
   const totalUnrealizedPnlPercent =
-    totalCostBasisIdr > 0 ? (totalUnrealizedPnlIdr / totalCostBasisIdr) * 100 : 0;
+    coveredCost > 0 ? (totalUnrealizedPnlIdr / coveredCost) * 100 : 0;
 
   return {
     totalNetWorthIdr,
@@ -209,5 +215,6 @@ export function computeGlobalWealthSummary(
     totalUnrealizedPnlPercent,
     totalRealizedPnlIdr: pockets.reduce((sum,p) => sum + (p.realizedPnlIdr || 0),0),
     totalRecordedPnlIdr: totalUnrealizedPnlIdr + pockets.reduce((sum,p) => sum + (p.realizedPnlIdr || 0),0),
+    incompleteValuationCount:pockets.filter(p=>p.valuationNeedsRefresh).length,
   };
 }
