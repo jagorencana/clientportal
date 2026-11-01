@@ -84,36 +84,35 @@ export const GlobalMetrics: React.FC<GlobalMetricsProps> = ({
     <div className="space-y-4">
       <section aria-label="Ringkasan Kekayaan" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="flex min-h-[142px] flex-col justify-between rounded-2xl border border-slate-200/80 bg-white p-4 shadow-xs">
-          <div className="flex items-start justify-between gap-3"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Nilai Seluruh Aset</span><span className="flex h-8 w-8 items-center justify-center rounded-xl bg-teal-50 text-teal-700"><Wallet className="h-4 w-4" /></span></div>
-          <div><div className="text-xl font-bold tabular-nums tracking-tight text-slate-900">{formatIdr(summary.totalNetWorthIdr)}</div><p className="mt-1 text-[11px] text-slate-400">{summary.incompleteValuationCount ? 'Nilai tercatat, sebagian estimasi' : 'Valuasi pasar terkini'} · {pocketsCount} kantong aset</p></div>
+          <div className="flex items-start justify-between gap-3"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Nilai Aset</span><span className="flex h-8 w-8 items-center justify-center rounded-xl bg-teal-50 text-teal-700"><Wallet className="h-4 w-4" /></span></div>
+          <div><div className="text-xl font-bold tabular-nums tracking-tight text-slate-900">{formatIdr(summary.totalNetWorthIdr)}</div><p className="mt-1 text-[11px] text-slate-400">{summary.incompleteValuationCount ? 'Berdasarkan nilai terakhir' : 'Nilai pasar terakhir'} · {pocketsCount} kantong aset</p></div>
         </div>
         <div className="flex min-h-[142px] flex-col justify-between rounded-2xl border border-slate-200/80 bg-white p-4 shadow-xs">
           <div className="flex items-start justify-between gap-3"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Modal Tersisa</span><span className="flex h-8 w-8 items-center justify-center rounded-xl bg-slate-100 text-slate-700"><Coins className="h-4 w-4" /></span></div>
-          <div><div className="text-xl font-bold tabular-nums tracking-tight text-slate-900">{formatIdr(summary.totalCostBasisIdr)}</div><p className="mt-1 text-[11px] text-slate-400">Modal perolehan aset yang masih dimiliki</p></div>
+          <div><div className="text-xl font-bold tabular-nums tracking-tight text-slate-900">{formatIdr(summary.totalCostBasisIdr)}</div><p className="mt-1 text-[11px] text-slate-400">Modal aset yang masih dimiliki</p></div>
         </div>
         <div className="flex min-h-[142px] flex-col justify-between rounded-2xl border border-slate-200/80 bg-white p-4 shadow-xs">
-          <div className="flex items-start justify-between gap-3"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">{summary.incompleteValuationCount ? 'Selisih nilai − modal · estimasi' : 'Floating P/L · seluruh aset'}</span><span className={`flex h-8 w-8 items-center justify-center rounded-xl ${isPnlPositive ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>{isPnlPositive ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}</span></div>
+          <div className="flex items-start justify-between gap-3"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Laba/Rugi Belum Dicairkan</span><span className={`flex h-8 w-8 items-center justify-center rounded-xl ${isPnlPositive ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>{isPnlPositive ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}</span></div>
           <div><div className={`text-xl font-bold tabular-nums tracking-tight ${isPnlPositive ? 'text-emerald-600' : 'text-rose-600'}`}>{formatIdr(summary.totalUnrealizedPnlIdr)}</div><p className={`mt-1 text-[11px] font-bold ${isPnlPositive ? 'text-emerald-700' : 'text-rose-700'}`}>{formatPercent(summary.totalUnrealizedPnlPercent)} · Seluruh aset − modal tersisa</p></div>
         </div>
         <div className="flex min-h-[142px] flex-col justify-between rounded-2xl border border-slate-200/80 bg-white p-4 shadow-xs">
-          <div className="flex items-start justify-between gap-3"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Amunisi Investasi Bebas</span><span className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-50 text-sm">💡</span></div>
-          <div className="my-3"><div className="whitespace-nowrap text-xl font-bold tabular-nums tracking-tight text-slate-900">{formatIdr(remainingCapacity)}</div><p className="mt-1 text-[11px] text-slate-400">Sisa kas siap dialokasikan bulan ini</p></div>
+          <div className="flex items-start justify-between gap-3"><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Sisa Anggaran Investasi</span><span className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-50 text-sm">💡</span></div>
+          <div className="my-3"><div className="whitespace-nowrap text-xl font-bold tabular-nums tracking-tight text-slate-900">{formatIdr(remainingCapacity)}</div><p className="mt-1 text-[11px] text-slate-400">Anggaran tersisa bulan ini</p></div>
           <div className="space-y-1 border-t border-slate-100 pt-2 text-[10px] tabular-nums text-slate-500">
             <div className="flex justify-between gap-2"><span>Plafon</span><strong className="whitespace-nowrap text-slate-700">{formatIdr(capacityLimit)}</strong></div>
             <div className="flex justify-between gap-2"><span>Terpakai</span><strong className="whitespace-nowrap text-slate-700">{formatIdr(monthlyAllocated)}</strong></div>
-            <div className="flex justify-between gap-2 text-emerald-700"><span>Sisa Siap Dialokasikan</span><strong className="whitespace-nowrap">{formatIdr(remainingCapacity)}</strong></div>
+            <div className="flex justify-between gap-2 text-emerald-700"><span>Sisa anggaran</span><strong className="whitespace-nowrap">{formatIdr(remainingCapacity)}</strong></div>
           </div>
         </div>
       </section>
 
       <section aria-label="Kinerja per kelas aset" className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
-        <h2 className="text-sm font-bold text-slate-900">Kinerja aset, terpisah dari jumlah kekayaan</h2>
-        <p className="mt-1 text-xs text-slate-500">Posisi per {positionDate}. Mutasi sejak {firstDate || 'belum ada pencatatan'}; setiap kantong memakai valuasi terakhirnya.</p>
-        <p className="mt-1 text-[11px] text-slate-500">Acuan kurs: {fxUpdatedAt || 'waktu tidak tersedia'}. Saat offline dapat memakai kurs tersimpan.</p>
-        {!!summary.incompleteValuationCount && <p className="mt-2 text-xs text-amber-800">{summary.incompleteValuationCount} kantong masih memakai estimasi. Semua kantong tetap masuk total aset dan selisih nilai−modal.</p>}
-        {!!summary.incompleteValuationCount && <div aria-label="Rekonsiliasi selisih nilai dan modal" className="mt-3 grid gap-2 rounded-lg bg-slate-50 p-3 text-xs sm:grid-cols-3"><div>Acuan valuasi tersedia<strong className="block tabular-nums">{formatIdr(summary.coveredUnrealizedPnlIdr || 0)}</strong></div><div>Bagian masih estimasi<strong className="block tabular-nums">{formatIdr(summary.estimatedUnrealizedPnlIdr || 0)}</strong></div><div>Jumlah seluruh kantong<strong className="block tabular-nums">{formatIdr(summary.totalUnrealizedPnlIdr)}</strong></div></div>}
+        <h2 className="text-sm font-bold text-slate-900">Ringkasan Hasil Investasi</h2>
+        <p className="mt-1 text-xs text-slate-500">Per {positionDate} · Sejak {firstDate || 'awal pencatatan'}</p>
+        <p className="mt-1 text-[11px] text-slate-500">Kurs diperbarui: {fxUpdatedAt || 'waktu belum tersedia'}</p>
+        {!!summary.incompleteValuationCount && <p className="mt-2 text-xs text-amber-800">{summary.incompleteValuationCount} kantong perlu diperbarui nilainya. Total sementara memakai nilai terakhir.</p>}
         <RealizedPerformance transactions={transactions} floating={summary.totalUnrealizedPnlIdr} estimated={!!summary.incompleteValuationCount} />
-        <div className="overflow-x-auto"><table className="w-full text-xs"><thead className="text-slate-500"><tr><th className="py-2 text-left">Kelas aset</th><th className="text-right">Nilai aset</th><th className="text-right">Floating P/L</th><th className="text-right">Realized tercatat</th></tr></thead><tbody>{performance.map(row=><tr key={row.name} className="border-t border-slate-100"><td className="py-2">{row.name}</td><td className="text-right">{formatIdr(row.value)}</td><td className={`text-right ${row.floating<0?'text-rose-600':'text-emerald-700'}`}>{formatIdr(row.floating)}{row.missing>0 ? ' (estimasi)' : ''}</td><td className="text-right">{formatIdr(row.realized)}</td></tr>)}</tbody></table></div>
+        <div className="overflow-x-auto"><table className="w-full text-xs"><thead className="text-slate-500"><tr><th className="py-2 text-left">Kelas aset</th><th className="text-right">Nilai aset</th><th className="text-right">Belum Dicairkan</th><th className="text-right">Laba/Rugi Pencairan</th></tr></thead><tbody>{performance.map(row=><tr key={row.name} className="border-t border-slate-100"><td className="py-2">{row.name}</td><td className="text-right">{formatIdr(row.value)}</td><td className={`text-right ${row.floating<0?'text-rose-600':'text-emerald-700'}`}>{formatIdr(row.floating)}{row.missing>0 ? ' *' : ''}</td><td className="text-right">{formatIdr(row.realized)}</td></tr>)}</tbody></table></div>
       </section>
 
       <section aria-label="Rincian Alokasi Aset" className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-xs sm:p-5">

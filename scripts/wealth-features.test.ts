@@ -63,9 +63,18 @@ test('mixed valuation coverage reconciles the user portfolio headline, classes a
   near(summary.totalRecordedPnlIdr!,summary.totalUnrealizedPnlIdr+3_656_469);
   near(summary.totalUnrealizedPnlPercent,2_398_393/630_183_233*100);
   const html=renderToStaticMarkup(React.createElement(GlobalMetrics,{summary,pocketsCount:3,pockets:accounts}));
-  assert.match(html,/Rp 2.398.393/);assert.match(html,/Rp 3.046.437/);
-  assert.match(html,/Rekonsiliasi selisih/);assert.match(html,/estimasi/);
+  assert.match(html,/Rp 2.398.393/);
+  assert.match(html,/Laba\/Rugi Belum Dicairkan/);assert.match(html,/perlu diperbarui nilainya/);
   assert.doesNotMatch(html,/belum masuk perhitungan untung|Floating P\/L · sebagian aset/);
+  const latestAccounts=[trust,{...other,marketValueIdr:100_635_527,unrealizedPnlIdr:-4_459_834},estimated];
+  const latest=computeGlobalWealthSummary(latestAccounts);
+  near(latest.totalNetWorthIdr,633_217_153);
+  near(latest.totalCostBasisIdr,630_183_233);
+  near(latest.totalUnrealizedPnlIdr,3_033_920);
+  near(latest.coveredUnrealizedPnlIdr!,-12_517);
+  near(latest.totalRecordedPnlIdr!,6_690_389);
+  near(performanceGroups(latestAccounts).reduce((sum,p)=>sum+p.value,0),latest.totalNetWorthIdr);
+  near(performanceGroups(latestAccounts).reduce((sum,p)=>sum+p.floating,0),latest.totalUnrealizedPnlIdr);
 });
 
 test('report excludes unvalued investments from performance without dropping their recorded asset value',()=>{
@@ -94,9 +103,9 @@ test('realization disclosure counts a disposal once, separates a loss and unknow
   near(result.total,3_656_468.722766421-20);
   assert.equal(result.rows.find(t=>t.id==='loss')!.pnl,-20);
   const html=renderToStaticMarkup(React.createElement(RealizedPerformance,{transactions:[...legs,loss,unknown],floating:276_605.2772335792}));
-  assert.doesNotMatch(html,/<details|<summary/);assert.match(html,/Modal dilepas/);assert.match(html,/tidak ditambahkan lagi/);assert.match(html,/estimasi pembukuan/);
+  assert.doesNotMatch(html,/<details|<summary/);assert.match(html,/Modal Dicairkan/);assert.match(html,/Tidak ditambahkan lagi/);assert.doesNotMatch(html,/diklasifikasikan|proporsional|rekonsiliasi/);
   const empty=renderToStaticMarkup(React.createElement(RealizedPerformance,{transactions:[unknown],floating:0}));
-  assert.doesNotMatch(empty,/<table|<details|<summary/);assert.match(empty,/Belum tersedia/);assert.match(empty,/belum diklasifikasikan/);
+  assert.doesNotMatch(empty,/<table|<details|<summary/);assert.match(empty,/Belum ada data/);assert.doesNotMatch(empty,/belum diklasifikasikan/);
 });
 
 test('USD pockets share one currency FX even when effective asset ratios differ',()=>{
@@ -125,7 +134,7 @@ test('investment redemption transfer conserves total assets and recorded gain',(
   assert.equal(recordedRealized(afterRows,'2026-11-01','2026-11-30'),0);
   assert.match(transferDependencyError(afterRows,rows[0]),/Batalkan/);
   const html=renderToStaticMarkup(React.createElement(GlobalMetrics,{summary:after,pocketsCount:2,pockets:p,transactions:afterRows,monthlySurplusCapacity:20_000_000}));
-  assert.match(html,/Hasil terealisasi tercatat/);assert.match(html,/Total P\/L tercatat/);assert.match(html,/Riwayat|riwayat/);
+  assert.match(html,/Laba\/Rugi Pencairan/);assert.match(html,/Total Hasil/);assert.match(html,/Sejak awal pencatatan/);
   assert.equal(performanceGroups(p).length,2);
 });
 
