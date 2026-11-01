@@ -37,11 +37,35 @@ test('USD monetary investment adds post-valuation deposits once without manufact
   const withdrawal={...topup,id:'out',type:'DEBET' as const};
   const unclear=computeCurrencyPocketSummary('USD',[opening,withdrawal],18132,fund);
   assert.equal(unclear.valuationNeedsRefresh,true,'redemption requires valuation reconciliation');
-  near(computeGlobalWealthSummary([unclear]).totalUnrealizedPnlIdr,0);
+  near(computeGlobalWealthSummary([unclear]).totalUnrealizedPnlIdr,unclear.marketValueIdr-unclear.totalCostBasisIdr);
+  near(computeGlobalWealthSummary([unclear]).coveredUnrealizedPnlIdr!,0);
   assert.equal(computeGlobalWealthSummary([unclear]).incompleteValuationCount,1);
   const refreshed=computeCurrencyPocketSummary('USD',[opening,topup],18132,{...fund,marketValueNative:6582.34,lastPriceUpdatedAt:'2026-10-24T00:00:00Z'});
   near(refreshed.marketValueIdr,result.marketValueIdr);
   near(refreshed.valuationTopUpsNative!,0);
+});
+
+test('mixed valuation coverage reconciles the user portfolio headline, classes and realized total',()=>{
+  const base=computeCurrencyPocketSummary('IDR',[],1,pocket('base'));
+  const trust={...base,pocketId:'trust',currency:'USD',instrumentType:'REKSADANA' as const,fxRateToIdr:18132,
+    manualMarketValueNative:6582.34,lastPriceUpdatedAt:'2026-09-30T08:42:00Z',marketValueIdr:119_350_989,totalCostBasisIdr:114_903_672,unrealizedPnlIdr:4_447_317};
+  const other={...base,pocketId:'other',marketValueIdr:100_000_000,totalCostBasisIdr:105_095_361,unrealizedPnlIdr:-5_095_361};
+  const estimated={...base,pocketId:'estimated',currency:'USD',instrumentType:'REKSADANA' as const,
+    valuationNeedsRefresh:true,marketValueIdr:413_230_637,totalCostBasisIdr:410_184_200,unrealizedPnlIdr:3_046_437,realizedPnlIdr:3_656_469};
+  const accounts=[trust,other,estimated];
+  const summary=computeGlobalWealthSummary(accounts);
+  near(summary.totalNetWorthIdr,632_581_626);near(summary.totalCostBasisIdr,630_183_233);
+  near(summary.totalUnrealizedPnlIdr,2_398_393);
+  near(summary.coveredUnrealizedPnlIdr!,-648_044);
+  near(summary.estimatedUnrealizedPnlIdr!,3_046_437);
+  near(summary.coveredUnrealizedPnlIdr!+summary.estimatedUnrealizedPnlIdr!,summary.totalUnrealizedPnlIdr);
+  near(performanceGroups(accounts).reduce((sum,p)=>sum+p.floating,0),summary.totalUnrealizedPnlIdr);
+  near(summary.totalRecordedPnlIdr!,summary.totalUnrealizedPnlIdr+3_656_469);
+  near(summary.totalUnrealizedPnlPercent,2_398_393/630_183_233*100);
+  const html=renderToStaticMarkup(React.createElement(GlobalMetrics,{summary,pocketsCount:3,pockets:accounts}));
+  assert.match(html,/Rp 2.398.393/);assert.match(html,/Rp 3.046.437/);
+  assert.match(html,/Rekonsiliasi selisih/);assert.match(html,/estimasi/);
+  assert.doesNotMatch(html,/belum masuk perhitungan untung|Floating P\/L · sebagian aset/);
 });
 
 test('report excludes unvalued investments from performance without dropping their recorded asset value',()=>{

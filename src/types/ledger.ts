@@ -118,6 +118,8 @@ export interface GlobalWealthSummary {
   totalRealizedPnlIdr?: number;
   totalRecordedPnlIdr?: number;
   incompleteValuationCount?: number;
+  coveredUnrealizedPnlIdr?: number;
+  estimatedUnrealizedPnlIdr?: number;
 }
 
 export interface DiscrepancyDetail {
