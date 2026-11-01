@@ -99,3 +99,10 @@ Missing or mismatched snapshot currency/date, same-day transactions with unknown
 Always preserve assets minus remaining cost equals headline unrealized/estimated difference. Coverage must never silently change this scope. Known-valuation contribution plus estimated-valuation contribution equals the same headline; class sums and report totals use identical arithmetic. Percentage uses the remaining cost of all included holdings. Unknown individual performance remains unavailable; portfolio differences are marked estimates rather than asserted current returns.
 
 Regression fixture from the reported numbers: assets Rp632,581,626 minus cost Rp630,183,233 equals +Rp2,398,393. Covered contribution -Rp648,044 plus estimated contribution +Rp3,046,437 equals that same +Rp2,398,393. Tests also reconcile class totals, percentages and realized-plus-floating totals. 28 tests, TypeScript and production build pass. No transaction data or Apps Script changes.
+
+
+## Plain-language performance UI
+
+Use Nilai Aset, Modal Tersisa, Laba/Rugi Belum Dicairkan, Laba/Rugi Pencairan and Total Hasil consistently in summary, detail and report labels. The arithmetic is unchanged. A single short notice explains holdings needing price refresh. Remove duplicate coverage reconciliation UI; keep its arithmetic regression tests. Do not display all ordinary cash outflows as an unresolved investment-realization count. Unknown realization remains explicitly unavailable, and brief data/estimate/dividend/fee limitations remain visible.
+
+The latest screenshot fixture also reconciles Rp633,217,153 assets minus Rp630,183,233 remaining cost to Rp3,033,920, plus Rp3,656,469 realization equals Rp6,690,389. Class sums match the same totals.

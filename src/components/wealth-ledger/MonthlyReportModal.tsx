@@ -338,7 +338,7 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                 {/* Metrik 1: Total Net Worth Riil */}
                 <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg">
                   <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider font-sans">
-                    {historicalData.coverage.missing ? 'Nilai Aset Tercatat (Sebagian Estimasi)' : 'Nilai Pasar Portofolio'}
+                    {historicalData.coverage.missing ? 'Nilai Aset *' : 'Nilai Pasar Portofolio'}
                   </div>
                   <div className="text-base sm:text-lg font-bold font-sans tabular-nums text-slate-900 mt-1">
                     {formatIdr(historicalData.totalMarketValue)}
@@ -364,7 +364,7 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                 {/* Metrik 3: Floating Profit/Loss */}
                 <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg">
                   <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider flex items-center justify-between font-sans">
-                    <span>{historicalData.coverage.missing ? 'Selisih Nilai − Modal · Estimasi' : 'Floating Profit / Loss'}</span>
+                    <span>{historicalData.coverage.missing ? 'Laba/Rugi Belum Dicairkan *' : 'Laba/Rugi Belum Dicairkan'}</span>
                     {historicalData.floatingPnl >= 0 ? (
                       <TrendingUp className="w-3 h-3 text-emerald-600" />
                     ) : (
@@ -388,8 +388,8 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                 </div>
               </div>
               <div className="mt-3 grid grid-cols-2 gap-3 text-[10px]">
-                <div className="rounded-lg border border-slate-200 p-3"><div>Hasil terealisasi tercatat · {periodLabel}</div><strong className="text-sm">{periodRealizations.rows.length ? formatIdr(realizedInPeriod) : 'Belum tersedia'}</strong></div>
-                <div className="rounded-lg border border-slate-200 p-3"><div>Total P/L tercatat hingga cut-off</div><strong className="text-sm">{formatIdr(historicalData.floatingPnl+realizedToCutoff)}</strong><p>Selisih seluruh aset−modal + realisasi tercatat. Sebagian valuasi mungkin estimasi; dividen/bunga terpisah belum tercakup.</p></div>
+                <div className="rounded-lg border border-slate-200 p-3"><div>Laba/Rugi Pencairan · {periodLabel}</div><strong className="text-sm">{periodRealizations.rows.length ? formatIdr(realizedInPeriod) : 'Belum tersedia'}</strong></div>
+                <div className="rounded-lg border border-slate-200 p-3"><div>Total Hasil hingga Tanggal Laporan</div><strong className="text-sm">{formatIdr(historicalData.floatingPnl+realizedToCutoff)}</strong><p>Belum dicairkan + laba/rugi pencairan. Dividen dan bunga terpisah belum termasuk.</p></div>
               </div>
             </div>
 
@@ -414,7 +414,7 @@ export const MonthlyReportModal: React.FC<MonthlyReportModalProps> = ({
                       <th className="w-[12%] py-2.5 px-2 text-right">Kurs FX ke IDR</th>
                       <th className="w-[18%] py-2.5 px-2 text-right">Nilai Pasar IDR</th>
                       <th className="w-[7%] py-2.5 px-1 text-right">Porsi</th>
-                      <th className="w-[10%] py-2.5 px-1 text-right">Floating P/L (%)</th>
+                      <th className="w-[10%] py-2.5 px-1 text-right">Belum Dicairkan (%)</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">

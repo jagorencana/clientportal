@@ -149,7 +149,7 @@ export const PocketBanner: React.FC<PocketBannerProps> = ({
               isPnlPositive ? 'text-emerald-800' : 'text-rose-800'
             }`}
           >
-            <span>Floating PnL</span>
+            <span>Laba/Rugi Belum Dicairkan</span>
             {isPnlPositive ? (
               <TrendingUp className="w-3.5 h-3.5" />
             ) : (
@@ -170,7 +170,7 @@ export const PocketBanner: React.FC<PocketBannerProps> = ({
                 : 'border-rose-200/60 text-rose-800'
             }`}
           >
-            <span>Return (%)</span>
+            <span>Perubahan (%)</span>
             <span className="font-sans tabular-nums font-bold">
               {pocket.valuationNeedsRefresh ? '—' : formatPercent(pocket.unrealizedPnlPercent)}
             </span>

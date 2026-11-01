@@ -320,13 +320,13 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
             <div className="bg-white/80 backdrop-blur-xs p-3.5 rounded-xl border border-slate-200/80">
               <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
                 <Coins className="w-3.5 h-3.5 text-slate-500" />
-                <span>{isInvestment ? 'Untung/Rugi Terealisasi' : 'Kurs Rata-Rata'}</span>
+                <span>{isInvestment ? 'Laba/Rugi Pencairan' : 'Kurs Rata-Rata'}</span>
               </div>
               <div className="text-lg sm:text-xl font-black text-slate-900 font-sans tabular-nums mt-1">
                 {isInvestment ? pocketRealizations.rows.length ? formatIdr(pocketRealizations.total) : 'Belum tersedia' : isIdr && !supportsManualValuation ? '1.0' : `Rp ${formatRate(pocket.averageBuyRate, pocket.currency)}`}
               </div>
               <div className="text-[10px] text-slate-400 mt-0.5">
-                {isInvestment ? 'Dari pencairan dengan modal tercatat' : 'Weighted average cost'}
+                {isInvestment ? 'Laba/rugi dari pencairan tercatat' : 'Weighted average cost'}
               </div>
             </div>
 
@@ -380,7 +380,7 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
                 ) : (
                   <TrendingDown className="w-3.5 h-3.5 text-rose-600" />
                 )}
-                <span>Belum Direalisasikan</span>
+                <span>Laba/Rugi Belum Dicairkan</span>
               </div>
               <div
                 className={`text-lg sm:text-xl font-black font-sans tabular-nums mt-1 ${
