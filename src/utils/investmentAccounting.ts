@@ -39,7 +39,8 @@ export function investmentPosition(pocket: AssetPocket, transactions: LedgerTran
   const cashflow = netCashflow(rows);
   const rawValue = pocket.marketValueNative ?? pocket.marketValue;
   const hasValuation = rawValue !== undefined && rawValue !== null &&
-    Number.isFinite(Number(rawValue)) && Number(rawValue) >= 0;
+    String(rawValue) !== '' && Number.isFinite(Number(rawValue)) && Number(rawValue) >= 0 &&
+    (Number(rawValue)>0 || !!pocket.lastPriceUpdatedAt);
   const valuationDate = pocket.lastPriceUpdatedAt
     ? new Date(pocket.lastPriceUpdatedAt).toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' }) : '';
   // Legacy snapshots have no cashflow anchor. Same-day transactions are ambiguous: require a refresh.

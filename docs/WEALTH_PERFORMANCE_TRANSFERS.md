@@ -115,3 +115,14 @@ Replace the estimated budget-capacity tile with actual current-month journal inf
 Use the Asia/Jakarta calendar, month start through today; exclude future dates and other months. Exclude tagged internal-transfer legs (transferId/transferLeg). Older manually entered transfers without pairing metadata cannot be inferred and continue to follow their journal classification. Cash outflow includes investment redemptions and is not labelled household spending or investment loss. Missing/invalid amounts are excluded with a visible count. Empty states remain visible, with no extra clicks. No new persistent data or Apps Script changes.
 
 30 tests, TypeScript and production build pass, including timezone rollover, historical FX ranking, more than five movements with whole-month totals, future-date exclusion, paired transfers, source-order preservation and empty-list rendering.
+
+
+## Confirmed transaction saving and legacy zero cells
+
+Reproduction: a SINKING_FUND pocket has marketValue/marketValueNative zero cells, no lastPriceUpdatedAt and Rp6.5m net deposits. The frontend normalizes undated zeros away, but the previous backend treated zero as a real snapshot and rejected a valid Rp1.5m debit as ambiguous. Treat undated zero cells as no manual valuation in both engines; retain an explicit dated zero as a real valuation. The reference engine and private active-engine helper use the same rule. Rebuild TransferEngine.js for parity.
+
+The transaction form now awaits backend confirmation before closing or changing journal balances. Failed validation/write keeps the form and draft, exposes an inline error, and does not flash an unconfirmed transaction. Lock fields/buttons while saving, retain the same draft ID for retries, and do not reinitialize the form when rates/pocket object identities refresh. Transport failures are explicitly unconfirmed rather than incorrectly described as locally saved. No automatic retry inserts or production-data repair is performed.
+
+31 tests pass against the latest private backend candidate, including successful save, same-ID retry and reloaded Rp5m remaining value/cost for the Shopping Budget fixture. TypeScript and production build pass. Synthetic browser QA with the real TransactionModal confirms pending-save lock, no pre-confirmation balance change, draft preservation on rejection and rate refresh, same ID on retry, and one confirmed Rp1.5m expense after success. No real-account write test was performed.
+
+Rollout requires this frontend PR and the corrected Apps Script helper/transfer bundle. Source is pushed to the editor/VS Code with backups; active deployment remains version 29 until owner approval. Do not tell the user to retry an uncertain existing production write without first checking the journal for the same transaction.

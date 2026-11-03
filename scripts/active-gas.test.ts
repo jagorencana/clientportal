@@ -8,6 +8,24 @@ import type { AssetPocket, LedgerTransaction } from '../src/types/ledger';
 
 // The production source remains outside Git because it contains private configuration.
 const fixture = process.env.ACTIVE_GAS_FIXTURE;
+
+test('Shopping Budget: legacy zero valuation cells without a date do not reject a valid expense', {skip:!fixture},()=>{
+  const ctx=vm.createContext({Utilities:{formatDate:(date:Date)=>new Date(date).toLocaleDateString('en-CA',{timeZone:'Asia/Jakarta'})}});
+  vm.runInContext(fs.readFileSync(path.join(fixture!,'Kode.js'),'utf8'),ctx);
+  vm.runInContext(fs.readFileSync(path.join(fixture!,'InvestmentAccounting.js'),'utf8'),ctx);
+  const pocket={id:'shopping',currencyCode:'IDR',currency:'IDR',instrumentType:'SINKING_FUND',marketValue:0,marketValueNative:0,lastPriceUpdatedAt:''};
+  const row=(id:string,date:string,amount:number)=>({id,date,pocketId:'shopping',currency:'IDR',type:'IN',amount,nativeAmount:amount,rate:1,exchangeRate:1,totalIdr:amount,costIdr:amount});
+  const rows=[row('opening','2026-10-21',1_500_000),row('father','2026-11-02',5_000_000)];
+  const position=ctx.investmentServerPosition(pocket,rows);
+  assert.equal(position.ambiguousLegacySnapshot,false,'an undated zero cell is not a saved valuation');
+  assert.equal(position.marketValueIdr,6_500_000);
+  const tx={...row('expense','2026-11-03',1_500_000),type:'OUT',totalIdr:-1_500_000,costIdr:-1_500_000,costBasisReleasedIdr:1_500_000};
+  assert.equal(ctx.validateInvestmentTransaction(pocket,rows,tx),'');
+  const after=ctx.investmentServerPosition(pocket,[...rows,tx]);
+  assert.equal(after.marketValueIdr,5_000_000);assert.equal(after.costBasisIdr,5_000_000);
+  const actualZero=ctx.investmentServerPosition({...pocket,lastPriceUpdatedAt:'2026-11-03T00:00:00Z'},rows);
+  assert.equal(actualZero.marketValueIdr,0,'a dated explicit zero valuation is still respected');
+});
 class Sheet {
   cells: any[][] = [];
   getLastRow() { return this.cells.length; }
@@ -132,4 +150,17 @@ test('deployed unified engine integration: redemption, retry, snapshot, tenant b
   assert.equal(refreshed.transactions.find((t:any)=>t.id==='e').costBasisReleasedIdr,tx.costBasisReleasedIdr);
   assert.equal(refreshed.pockets[0].valuationCashflowIdr,position.cashflow);
   assert.equal(investmentPosition({...pocket,...refreshed.pockets[0]},nativeRows).marketValueIdr,800_000);
+  const shopping={...pocket,id:'shopping',name:'Shopping Budget',marketValue:0,marketValueNative:0,lastPriceUpdatedAt:''};
+  pocketSheet.cells.push(pocketSheet.cells[0].map((header:string)=>ctx.pocketSyncValue(shopping,header,email,1,'','2026-11-03T00:00:00Z')));
+  const shoppingRows=[{...row('shop-a','2026-10-21','CREDIT',1_500_000),pocketId:'shopping'},
+    {...row('shop-b','2026-11-02','CREDIT',5_000_000),pocketId:'shopping'}];
+  for(const item of shoppingRows)assert.equal(ctx.handleSaveLedgerTransaction({userEmail:email,transaction:item},ss).success,true);
+  const expense={...row('shop-expense','2026-11-03','DEBET',1_500_000),pocketId:'shopping',costIdr:-1_500_000,costBasisReleasedIdr:1_500_000};
+  assert.equal(ctx.handleSaveLedgerTransaction({userEmail:email,transaction:expense},ss).success,true);
+  assert.equal(ctx.handleSaveLedgerTransaction({userEmail:email,transaction:expense},ss).success,true,'retry upserts the same id');
+  const reload=ctx.handleGetLedgerData(ss,email);
+  const shopRows=reload.transactions.filter((t:any)=>t.pocketId==='shopping').map((t:any)=>({...t,type:t.type==='IN'?'CREDIT':'DEBET',nativeAmount:t.amount,exchangeRate:t.rate,costIdr:t.totalIdr}));
+  assert.equal(shopRows.length,3,'confirmed expense persists after reload without a duplicate');
+  const shopPosition=investmentPosition({...shopping,...reload.pockets.find((p:any)=>p.id==='shopping')},shopRows);
+  assert.equal(shopPosition.marketValueIdr,5_000_000);assert.equal(shopPosition.costBasisIdr,5_000_000);
 });

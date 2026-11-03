@@ -651,32 +651,30 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
     setIsTxModalOpen(true);
   };
 
-  const handleSaveTransaction = async (tx: LedgerTransaction) => {
+  const handleSaveTransaction = async (tx: LedgerTransaction)  : Promise<boolean> => {
     const previous=transactionsRef.current.find(t=>t.id===tx.id);
     const metadataOnly=!!previous && !previous.transferId && sameFinancialValues(previous,tx);
     if(metadataOnly)tx={...tx,costBasisReleasedIdr:previous!.costBasisReleasedIdr};
     const transferError=metadataOnly?'':transferDependencyError(transactionsRef.current,tx);
-    if(transferError){showToast(transferError);return;}
+    if(transferError)throw new Error(transferError);
     const pocket = pocketsRef.current.find(p => p.id === tx.pocketId);
     const isInvestment = pocket && isRupiahInvestment(pocket);
     if (isInvestment && !metadataOnly) {
       const history = transactionsRef.current;
       const mutationError = investmentMutationError(pocket, history, tx);
-      if (mutationError) { showToast(mutationError); return; }
+      if (mutationError) throw new Error(mutationError);
       if (tx.type === 'DEBET') {
         const preview = redemptionPreview(pocket, history.filter(t => t.id !== tx.id), tx.nativeAmount);
         if (!investmentAccountingReady || preview.ambiguousLegacySnapshot) {
-          showToast('Perbarui layanan pencatatan dan nilai investasi sebelum mencairkan dana.');
-          return;
+          throw new Error('Perbarui layanan pencatatan dan nilai investasi sebelum mencairkan dana.');
         }
         if (tx.nativeAmount > preview.marketValueIdr + 0.000001) {
-          showToast('Penarikan melebihi nilai investasi tercatat.');
-          return;
+          throw new Error('Penarikan melebihi nilai investasi tercatat.');
         }
         tx = { ...tx, costBasisReleasedIdr: preview.costBasisReleasedIdr };
       }
     } else if (!metadataOnly && tx.type === 'DEBET') {
-      const currentBalance = transactions
+      const currentBalance = transactionsRef.current
         .filter(
           (t) =>
             (String(t.pocketId ?? '').trim() === String(tx.pocketId ?? '').trim() ||
@@ -689,48 +687,37 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
         );
 
       if (tx.nativeAmount > currentBalance + 0.000001) {
-        showToast(
-          `Gagal: Penarikan melebihi saldo tersedia (${currentBalance.toLocaleString('id-ID')} ${tx.currency}).`
-        );
-        return;
+        throw new Error(`Penarikan melebihi saldo tersedia (${currentBalance.toLocaleString('id-ID')} ${tx.currency}).`);
       }
     }
 
-    setIsTxModalOpen(false);
-    setEditingTx(null);
-
-    const existingIndex = transactions.findIndex((t) => t.id === tx.id);
-    let updated: LedgerTransaction[];
-
-    if (existingIndex >= 0) {
-      updated = [...transactions];
-      updated[existingIndex] = tx;
-    } else {
-      updated = [tx, ...transactions];
-    }
-
-    const previousTransaction = existingIndex >= 0 ? transactions[existingIndex] : undefined;
+    const wasEditing=!!previous;
     const mutationTenant = effectiveEmail;
     ledgerMutationVersionRef.current += 1;
     beginLedgerWrite(mutationTenant);
-    updateTransactions(updated);
     try {
       const result = await enqueueLedgerWrite(() => saveRemoteTransaction(tx, mutationTenant));
-      if (activeTenantEmailRef.current !== mutationTenant) return;
+      if (activeTenantEmailRef.current !== mutationTenant) return false;
       if (!isLedgerMutationSuccess(result)) {
         throw new Error(result?.message || 'Google Sheets tidak mengonfirmasi penyimpanan transaksi.');
       }
+      // Update balances only after the backend confirms the write.
+      const current=transactionsRef.current;
+      const index=current.findIndex(t=>t.id===tx.id);
+      const confirmed=index<0?[tx,...current]:current.map(t=>t.id===tx.id?tx:t);
+      updateTransactions(confirmed);
+      ledgerMutationVersionRef.current += 1;
+      setIsTxModalOpen(false);
+      setEditingTx(null);
       showToast(
-        existingIndex >= 0
+        wasEditing
           ? `Transaksi "${tx.description}" berhasil diperbarui.`
           : `Transaksi "${tx.description}" berhasil disimpan ke Google Sheets.`
       );
+      return true;
     } catch (error: any) {
-      if (activeTenantEmailRef.current !== mutationTenant) return;
-      ledgerMutationVersionRef.current += 1;
-      const withoutFailedWrite = transactionsRef.current.filter((item) => item.id !== tx.id);
-      updateTransactions(previousTransaction ? [previousTransaction, ...withoutFailedWrite] : withoutFailedWrite);
-      showToast(error?.message || 'Transaksi gagal disimpan ke Google Sheets. Perubahan dibatalkan.');
+      if (activeTenantEmailRef.current !== mutationTenant) return false;
+      throw new Error(error?.message || 'Transaksi belum tersimpan. Isian tetap tersedia; silakan coba lagi.');
     } finally {
       finishLedgerWrite(mutationTenant);
     }

@@ -30,7 +30,7 @@ const near = (actual: number, expected: number) => assert.ok(Math.abs(actual - e
 
 test('actual withdrawal form renders market value as the limit for Junior Vault', () => {
   const html = renderToStaticMarkup(React.createElement(TransactionModal, {
-    isOpen: true, onClose: () => {}, onSave: () => {},
+    isOpen: true, onClose: () => {}, onSave: async () => true,
     defaultPocketId: pocket.id, defaultType: 'DEBET', currentRates: {IDR: 1},
     pockets: [pocket], transactions: history, investmentAccountingReady: true,
   }));

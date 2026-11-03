@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   AssetPocket,
   CurrencyType,
@@ -20,7 +20,7 @@ import {
 interface TransactionModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (tx: LedgerTransaction) => void;
+  onSave: (tx: LedgerTransaction) => Promise<boolean>;
   editTransaction?: LedgerTransaction | null;
   defaultPocketId?: string;
   defaultCurrency?: CurrencyType;
@@ -55,6 +55,10 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   const [exchangeRateStr, setExchangeRateStr] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string>('');
+  const [isSaving,setIsSaving]=useState(false);
+  const savingRef=useRef(false);
+  const initializedRef=useRef('');
+  const draftIdRef=useRef('');
 
   // Identifikasi kantong aktif target transaksi (Pocket-Centric)
   const activePocket: AssetPocket =
@@ -108,7 +112,11 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
 
   // Pre-fill form when editing or opening
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {initializedRef.current='';return;}
+    const key=[editTransaction?.id||'new',activePocket?.id,defaultType].join('|');
+    if(initializedRef.current===key)return;
+    initializedRef.current=key;
+    draftIdRef.current=editTransaction?.id||`tx-${Date.now()}-${crypto.randomUUID()}`;
 
     if (editTransaction) {
       setType(editTransaction.type);
@@ -202,8 +210,9 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     (isIdr || cleanRate > 0) &&
     !isOverdraft && !investmentError;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if(savingRef.current)return;
     setErrorMsg('');
     if (investmentError) {
       setErrorMsg(investmentError);
@@ -260,7 +269,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       (isIdr ? 'BCA / Jago / Cash' : 'CIMB Niaga');
 
     const tx: LedgerTransaction = {
-      id: editTransaction ? editTransaction.id : `tx-${Date.now()}`,
+      id: editTransaction ? editTransaction.id : draftIdRef.current,
       pocketId: activePocket.id, // Mandatory Foreign Key to active pocket
       date,
       currency: activePocket.currencyCode,
@@ -279,7 +288,13 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       costBasisReleasedIdr: metadataOnly ? editTransaction?.costBasisReleasedIdr : redemption?.costBasisReleasedIdr,
     };
 
-    onSave(tx);
+    savingRef.current=true;
+    setIsSaving(true);
+    try {
+      if(!await onSave(tx))setErrorMsg('Transaksi belum dikonfirmasi. Isian tetap tersedia; silakan coba lagi.');
+    } catch(error:any){
+      setErrorMsg(error?.message||'Transaksi belum tersimpan. Silakan coba lagi.');
+    } finally {savingRef.current=false;setIsSaving(false);}
   };
 
   if (!isOpen) return null;
@@ -311,7 +326,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={()=>{if(!savingRef.current)onClose();}}
+              disabled={isSaving}
             className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
           >
             <X className="w-5 h-5" />
@@ -351,7 +367,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="mt-4 space-y-4">
+        <form onSubmit={handleSubmit} className="mt-4"><fieldset disabled={isSaving} className="space-y-4">
           {isInvestment && (
             <p className="text-xs text-slate-600">
               {type === 'DEBET' ? 'Perbarui nilai investasi sebelum mencairkan. Ke rekening sendiri? Gunakan Pindahkan antar kantong.' : 'Masukkan nominal top up sesuai aplikasi investasi.'}
@@ -581,20 +597,21 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
             <button
               type="button"
-              onClick={onClose}
+              onClick={()=>{if(!savingRef.current)onClose();}}
+              disabled={isSaving}
               className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition cursor-pointer"
             >
               Batal
             </button>
             <button
               type="submit"
-              disabled={!isFormValid}
+              disabled={isSaving || !isFormValid}
               className="px-5 py-2 text-xs font-bold text-white bg-[#32A89C] hover:bg-[#288a80] rounded-xl shadow-xs transition cursor-pointer active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {editTransaction ? 'Simpan Perubahan' : 'Catat ke Jurnal'}
+              {isSaving ? 'Menyimpan…' : editTransaction ? 'Simpan Perubahan' : 'Catat ke Jurnal'}
             </button>
           </div>
-        </form>
+        </fieldset></form>
       </div>
     </div>
   );
