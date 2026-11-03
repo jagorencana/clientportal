@@ -4,6 +4,7 @@
  */
 
 import { AssetPocket, InstrumentType, LedgerTransaction } from '../types/ledger';
+import {auditLedger,cacheBelongsToTenant,normalizeLedgerTransaction} from '../utils/ledgerIntegrity';
 import type {TransferInput} from '../utils/ledgerTransfers';
 
 export async function saveRemoteTransfer(transfer:TransferInput,email:string) {
@@ -93,20 +94,9 @@ export const loadCachedLedgerData = (userEmail: string): RemoteLedgerPayload | n
     if (!raw) return null;
     const cached = JSON.parse(raw) as RemoteLedgerPayload;
     if (!Array.isArray(cached.pockets) || !Array.isArray(cached.transactions)) return null;
-    if (cached.cacheTenantEmail && cached.cacheTenantEmail !== email) {
-      console.warn('Cache Wealth Ledger ditolak karena tenant tidak cocok.');
+    if(!cacheBelongsToTenant(cached,email)){
+      console.warn('Cache Wealth Ledger ditolak: kepemilikan akun tidak dapat dipastikan.');
       return null;
-    }
-    if (!cached.cacheTenantEmail) {
-      const embeddedEmails = new Set(
-        cached.pockets
-          .map((pocket) => String(pocket.userEmail || '').trim().toLowerCase())
-          .filter(Boolean)
-      );
-      if (embeddedEmails.size > 0 && !embeddedEmails.has(email)) {
-        console.warn('Cache lama Wealth Ledger ditolak karena tenant tidak cocok.');
-        return null;
-      }
     }
     if (!window.localStorage.getItem(currentKey)) {
       window.localStorage.setItem(
@@ -172,17 +162,17 @@ export const normalizeRemotePocket = (p: any, idx: number = 0): AssetPocket => {
     ? Number.NaN
     : Number(rawMarketValue);
   // Nol/kosong dari sel Sheets bukan valuasi manual. Nilai manual baru aktif setelah input positif.
-  const marketValue = Number.isFinite(parsedMarketValue) && parsedMarketValue > 0
+  const marketValue = Number.isFinite(parsedMarketValue) && parsedMarketValue >= 0 && (parsedMarketValue>0 || !!p.lastPriceUpdatedAt)
     ? parsedMarketValue
     : undefined;
   const rawNativeMarketValue = p.marketValueNative;
   const parsedNativeMarketValue = rawNativeMarketValue === '' || rawNativeMarketValue === null || rawNativeMarketValue === undefined
     ? Number.NaN
     : Number(rawNativeMarketValue);
-  const marketValueNative = Number.isFinite(parsedNativeMarketValue) && parsedNativeMarketValue > 0
+  const marketValueNative = Number.isFinite(parsedNativeMarketValue) && parsedNativeMarketValue >= 0 && (parsedNativeMarketValue>0 || !!p.lastPriceUpdatedAt)
     ? parsedNativeMarketValue
     : undefined;
-  const marketValueCurrency = marketValueNative
+  const marketValueCurrency = marketValueNative !== undefined
     ? String(p.marketValueCurrency || currency).trim().toUpperCase()
     : undefined;
 
@@ -337,6 +327,8 @@ export const fetchRemoteLedgerData = async (
         throw new Error(data?.message || 'Ledger API mengembalikan respons gagal.');
       }
 
+      data.sourcePockets=Array.isArray(data.pockets)?data.pockets:[];
+      if(!cacheBelongsToTenant({cacheTenantEmail:emailParam,pockets:data.sourcePockets,transactions:Array.isArray(data.transactions)?data.transactions:[]},emailParam))throw new Error('Data akun tidak cocok. Muat ulang sesi akun Anda.');
       const normalizedPockets = (Array.isArray(data.pockets) ? data.pockets : [])
         .map((p: any, idx: number) => normalizeRemotePocket(p, idx));
       const uniquePockets = new Map<string, AssetPocket>();
@@ -350,44 +342,12 @@ export const fetchRemoteLedgerData = async (
       data.pockets = Array.from(uniquePockets.values());
       data.duplicatePocketIds = Array.from(duplicatePocketIds);
 
-      data.transactions = (Array.isArray(data.transactions) ? data.transactions : []).map((tx: any) => {
-        const rawAmount = tx.amount !== undefined ? tx.amount : tx.nativeAmount;
-        const rawRate = tx.rate !== undefined ? tx.rate : tx.exchangeRate;
-        const cleanAmount = typeof rawAmount === 'string'
-          ? parseFloat(rawAmount.replace(/[^0-9.-]+/g, ''))
-          : Number(rawAmount);
-        const cleanRate = typeof rawRate === 'string'
-          ? parseFloat(rawRate.replace(/[^0-9.-]+/g, ''))
-          : Number(rawRate);
-        const safeAmount = Number.isFinite(cleanAmount) ? cleanAmount : 0;
-        const safeRate = Number.isFinite(cleanRate) ? cleanRate : 1;
-        const storedTotal=Number(tx.totalIdr??tx.costIdr);
-        const safeTotalIdr = tx.transferId && Number.isFinite(storedTotal) ? Math.abs(storedTotal) : Math.round(safeAmount * safeRate);
-        const isCredit = tx.type === 'CREDIT' || String(tx.type).toUpperCase() === 'IN';
-        return {
-          ...tx,
-            costBasisReleasedIdr: tx.costBasisReleasedIdr !== '' && tx.costBasisReleasedIdr != null && Number.isFinite(Number(tx.costBasisReleasedIdr))
-              ? Number(tx.costBasisReleasedIdr) : undefined,
-          id: tx.id || `tx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          pocketId: String(tx.pocketId ?? '').trim(),
-          nativeAmount: safeAmount,
-          exchangeRate: safeRate,
-          amount: safeAmount,
-          rate: safeRate,
-          type: isCredit ? 'CREDIT' : 'DEBET',
-          costIdr: isCredit ? safeTotalIdr : -safeTotalIdr,
-          totalIdr: isCredit ? safeTotalIdr : -safeTotalIdr,
-          description: tx.description || tx.note || tx.notes || 'Mutasi Transaksi',
-          date: tx.date || new Date().toISOString().split('T')[0],
-        };
-      });
-
-      const activePocketIds = new Set(
-        data.pockets.map((pocket) => String(pocket.id || '').trim()).filter(Boolean)
-      );
-      data.transactions = data.transactions.filter((transaction) =>
-        activePocketIds.has(String(transaction.pocketId || '').trim())
-      );
+      data.sourceTransactions=Array.isArray(data.transactions)?data.transactions:[];
+      data.transactions=data.sourceTransactions.map(normalizeLedgerTransaction);
+      const integrity=auditLedger(data.pockets,data.transactions);
+      data.integrityIssues=integrity.issues;
+      if(data.sourcePockets.some((p:any)=>!String(p.id||p.pocketId||'').trim()))data.integrityIssues.push({priority:'P1',code:'pocket-id',message:'ID kantong kosong pada sumber data.'});
+      if(duplicatePocketIds.size)data.integrityIssues.push({priority:'P1',code:'pocket-id',message:'ID kantong berulang pada sumber data.'});
       data.source = 'remote';
       if (options.persistCache !== false) saveCachedLedgerData(emailParam, data);
       return data;
@@ -474,7 +434,8 @@ export const saveRemoteTransaction = async (
     const cleanRate = typeof rawRate === 'string'
       ? parseFloat(rawRate.replace(/[^0-9.-]+/g, ''))
       : Number(rawRate);
-    const cleanTotalIdr = Math.round(cleanAmount * cleanRate);
+    const suppliedTotal=transaction?.costIdr??transaction?.totalIdr;
+    const cleanTotalIdr=suppliedTotal!==undefined&&suppliedTotal!==null&&suppliedTotal!==''?Math.abs(Number(suppliedTotal)):Math.round(cleanAmount*cleanRate);
 
     // Pastikan type 'IN' (untuk CREDIT) atau 'OUT' (untuk DEBET)
     const rawType = String(transaction?.type || 'CREDIT').toUpperCase();
@@ -490,7 +451,7 @@ export const saveRemoteTransaction = async (
       !Number.isFinite(cleanAmount) ||
       cleanAmount <= 0 ||
       !Number.isFinite(cleanRate) ||
-      cleanRate <= 0
+      cleanRate <= 0 || !Number.isFinite(cleanTotalIdr) || cleanTotalIdr<=0
     ) {
       return {
         success: false,
@@ -559,17 +520,17 @@ export const syncRemotePockets = async (
       custodian: String(normalizedPocket.custodian || normalizedPocket.defaultCustodian || 'CIMB Niaga').trim(),
       category: String(normalizedPocket.category || '').trim(),
       sortOrder: typeof p.sortOrder === 'number' ? p.sortOrder : idx + 1,
-      manualMarketRate: Number(p.manualMarketRate || 0) || '',
-      marketValue: Number.isFinite(Number(p.marketValue)) && Number(p.marketValue) > 0
+      manualMarketRate: p.manualMarketRate === undefined ? undefined : Number(p.manualMarketRate),
+      marketValue: p.marketValue !== undefined && Number.isFinite(Number(p.marketValue)) && Number(p.marketValue) >= 0 && (Number(p.marketValue)>0 || !!p.lastPriceUpdatedAt)
         ? Number(p.marketValue)
         : undefined,
-      marketValueNative: Number.isFinite(Number(p.marketValueNative)) && Number(p.marketValueNative) > 0
+      marketValueNative: Number.isFinite(Number(p.marketValueNative)) && Number(p.marketValueNative) >= 0 && (Number(p.marketValueNative)>0 || !!p.lastPriceUpdatedAt)
         ? Number(p.marketValueNative)
         : undefined,
-      marketValueCurrency: p.marketValueNative
+      marketValueCurrency: p.marketValueNative !== undefined
         ? String(p.marketValueCurrency || normalizedPocket.currencyCode).trim().toUpperCase()
         : undefined,
-      lastPriceUpdatedAt: p.lastPriceUpdatedAt || '',
+      lastPriceUpdatedAt: p.lastPriceUpdatedAt,
       valuationCashflowIdr: p.valuationCashflowIdr,
       updatedAt: p.updatedAt || nowIso,
     };
@@ -607,9 +568,9 @@ export const updateRemotePocketMarketRate = async (
     const rate = Number(manualMarketRate);
     const totalMarketValue = Number(marketValue);
     const nativeMarketValue = Number(marketValueNative);
-    if (!emailToUse || !normalizedPocketId || !Number.isFinite(rate) || rate <= 0) return null;
+    if (!emailToUse || !normalizedPocketId || !Number.isFinite(rate) || rate < 0) return null;
     if (marketValue !== undefined && (!Number.isFinite(totalMarketValue) || totalMarketValue < 0)) return null;
-    if (marketValueNative !== undefined && (!Number.isFinite(nativeMarketValue) || nativeMarketValue <= 0)) return null;
+    if (marketValueNative !== undefined && (!Number.isFinite(nativeMarketValue) || nativeMarketValue < 0)) return null;
 
     const res = await executeApiRequest('', {
       method: 'POST',

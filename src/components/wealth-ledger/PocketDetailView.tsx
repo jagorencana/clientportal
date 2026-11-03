@@ -89,9 +89,9 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
     setMarketValueSaveError('');
     setMarketValueInput(
       pocket.adjustedMarketValueNative !== undefined
-        ? formatIdNumber(pocket.adjustedMarketValueNative,0,2)
+        ? (pocket.adjustedMarketValueNative===0?'0':formatIdNumber(pocket.adjustedMarketValueNative,0,2))
         : pocket.manualMarketValueNative !== undefined
-        ? formatIdNumber(pocket.manualMarketValueNative, 0, 2)
+        ? (pocket.manualMarketValueNative===0?'0':formatIdNumber(pocket.manualMarketValueNative, 0, 2))
         : pocket.manualMarketValue !== undefined || pocket.manualMarketRate
         ? formatIdNumber(isForeignMarketValue
             ? Number((pocket.marketValueIdr / Math.max(pocket.fxRateToIdr || pocket.currentMarketRate, 1)).toFixed(2))
@@ -132,7 +132,7 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
   }, [pocket.lastPriceUpdatedAt]);
 
   const saveMarketValue = async () => {
-    if (previewMarketRate <= 0 || valuationDenominator <= 0) return;
+    if (!marketValueInput.trim() || previewMarketRate < 0 || valuationDenominator <= 0) return;
     setIsSavingMarketValue(true);
     setMarketValueSaveError('');
     try {
@@ -445,7 +445,7 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
             <button
               type="button"
               onClick={saveMarketValue}
-              disabled={previewMarketRate <= 0 || valuationDenominator <= 0 || isSavingMarketValue}
+              disabled={!marketValueInput.trim() || previewMarketRate < 0 || valuationDenominator <= 0 || isSavingMarketValue}
               className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isSavingMarketValue ? <Loader2 className="h-4 w-4 animate-spin" /> : <TrendingUp className="h-4 w-4" />}

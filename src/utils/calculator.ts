@@ -7,6 +7,7 @@ import {
 } from '../types/ledger';
 import { investmentPosition, isRupiahInvestment, foreignInvestmentValuation } from './investmentAccounting';
 import { reportValuationKnown } from './wealthPresentation';
+import {validLedgerDate} from './ledgerIntegrity';
 
 export interface EnrichedTransaction extends LedgerTransaction {
   isCredit: boolean;
@@ -21,7 +22,7 @@ export function filterValidTransactions(
 ): LedgerTransaction[] {
   if (!Array.isArray(transactions)) return [];
   return transactions.filter((t) => {
-    if (!t) return false;
+    if (!t || !t.id || !validLedgerDate(t.date) || !['CREDIT','IN','DEBET','OUT'].includes(String(t.type))) return false;
     const amount = Number(t.nativeAmount !== undefined ? t.nativeAmount : t.amount);
     const rate = Number(t.exchangeRate !== undefined ? t.exchangeRate : t.rate !== undefined ? t.rate : 1);
     return (
@@ -29,8 +30,9 @@ export function filterValidTransactions(
       amount > 0 &&
       isFinite(amount) &&
       !isNaN(rate) &&
-      rate >= 0 &&
-      isFinite(rate)
+      rate > 0 &&
+      isFinite(rate) &&
+      Number.isFinite(Number(t.costIdr??t.totalIdr??amount*rate))
     );
   });
 }
@@ -90,9 +92,9 @@ export function computeCurrencyPocketSummary(
     pocket.instrumentType === 'ASET_FISIK';
   const manualMarketRate = Number(pocket.manualMarketRate || 0);
   const storedMarketValue = Number(pocket.marketValue);
-  const hasStoredMarketValue = Number.isFinite(storedMarketValue) && storedMarketValue > 0;
+  const hasStoredMarketValue = pocket.marketValue !== undefined && pocket.marketValue !== null && Number.isFinite(storedMarketValue) && storedMarketValue >= 0 && (storedMarketValue>0||!!pocket.lastPriceUpdatedAt);
   const storedNativeMarketValue = Number(pocket.marketValueNative);
-  const hasStoredNativeMarketValue = Number.isFinite(storedNativeMarketValue) && storedNativeMarketValue > 0;
+  const hasStoredNativeMarketValue = pocket.marketValueNative !== undefined && pocket.marketValueNative !== null && Number.isFinite(storedNativeMarketValue) && storedNativeMarketValue >= 0 && (storedNativeMarketValue>0||!!pocket.lastPriceUpdatedAt);
   const storedMarketCurrency = String(pocket.marketValueCurrency || code).toUpperCase();
   const effectiveSpotRate =
     supportsManualValuation && manualMarketRate > 0 && !hasStoredNativeMarketValue
@@ -108,7 +110,11 @@ export function computeCurrencyPocketSummary(
     ? storedNativeMarketValue
     : currentMarketRate > 0 ? storedNativeMarketValue * currentMarketRate : hasStoredMarketValue ? storedMarketValue : totalCostBasisIdr;
   const foreignValuation=foreignInvestmentValuation(pocket,pocketTxs,currentMarketRate);
-  const marketValueIdr = foreignValuation?.marketValueIdr ?? (investment ? investment.marketValueIdr : supportsManualValuation && hasStoredNativeMarketValue
+  const valuationDay=pocket.lastPriceUpdatedAt?new Date(pocket.lastPriceUpdatedAt).toLocaleDateString('en-CA',{timeZone:'Asia/Jakarta'}):'';
+  const changedAfterSnapshot=supportsManualValuation&&!investment&&!foreignValuation&&(hasStoredMarketValue||hasStoredNativeMarketValue)&&
+    (!validLedgerDate(valuationDay)||pocketTxs.some(t=>t.date>=valuationDay));
+  const closedUnitPosition=changedAfterSnapshot&&validLedgerDate(valuationDay)&&balanceNative===0&&totalDebetNative>0&&pocketTxs.some(t=>t.date>valuationDay);
+  const marketValueIdr = closedUnitPosition?0:foreignValuation?.marketValueIdr ?? (investment ? investment.marketValueIdr : supportsManualValuation && hasStoredNativeMarketValue
     ? nativeMarketValueIdr
     : supportsManualValuation && hasStoredMarketValue
       ? storedMarketValue
@@ -134,7 +140,7 @@ export function computeCurrencyPocketSummary(
     balanceNative,
     availableBalanceNative: investment ? Math.max(0, investment.marketValueIdr) : balanceNative,
     realizedPnlIdr: investment?.realizedPnlIdr,
-    valuationNeedsRefresh:foreignValuation?.needsRefresh,
+    valuationNeedsRefresh:foreignValuation?.needsRefresh || !!changedAfterSnapshot,
     adjustedMarketValueNative:foreignValuation?.adjustedNative,
     valuationTopUpsNative:foreignValuation?.addedNative,
     totalCostBasisIdr,

@@ -18,7 +18,7 @@ export function reportFxRate(p: CurrencyPocketSummary, rates: Record<string,numb
 export function reportValuationKnown(p:CurrencyPocketSummary,cutoff=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Jakarta'})) {
   if(p.valuationNeedsRefresh)return false;
   if(p.instrumentType==='CASH_VALAS') return Number.isFinite(p.fxRateToIdr) && p.fxRateToIdr!>0;
-  const hasValue=[p.manualMarketValue,p.manualMarketValueNative,p.manualMarketRate].some(v=>Number.isFinite(v)&&v!>0);
+  const hasValue=[p.manualMarketValue,p.manualMarketValueNative,p.manualMarketRate].some(v=>v!==undefined&&Number.isFinite(v)&&v!>=0);
   const valuationDay=p.lastPriceUpdatedAt ? new Date(p.lastPriceUpdatedAt).toLocaleDateString('en-CA',{timeZone:'Asia/Jakarta'}) : '';
   return hasValue && !!valuationDay && valuationDay<=cutoff;
 }

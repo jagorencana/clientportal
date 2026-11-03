@@ -306,17 +306,15 @@ function handleSyncLedgerPockets(payload) {
     const tenantTransactions = readTenantLedgerRows(ss.getSheetByName('LEDGER_TRANSACTIONS'), userEmail).concat(loadTransferTransactions(ss,userEmail));
     pockets.forEach(function(pocket) {
       const original = currentPockets.find(function(p) { return String(p.id) === String(pocket.id || pocket.pocketId); });
+      const typeError=pocketServerTypeMutationError(original,pocket,tenantTransactions);
+      if(typeError)throw new Error(typeError);
       if(original && tenantTransactions.some(function(t){return String(t.pocketId)===String(original.id)&&t.transferId;}) && (normalizePocketInstrumentType(original)!==normalizePocketInstrumentType(pocket)||String(original.currency||original.currencyCode)!==String(pocket.currency||pocket.currencyCode))) throw Error('Batalkan perpindahan terkait sebelum mengubah jenis atau mata uang kantong.');
       if (original && isMoneyInvestment(original) && !isMoneyInvestment(pocket) && tenantTransactions.some(function(t) {
         return String(t.pocketId) === String(original.id) && hasReleasedCost(t);
       })) throw new Error('Perubahan jenis kantong dengan pencairan tercatat memerlukan rekonsiliasi.');
     });
     const result = upsertTenantPockets(pocketSheet, userEmail, pockets);
-    const restored = restoreOrphanPocketMasters(
-      pocketSheet,
-      ss.getSheetByName('LEDGER_TRANSACTIONS'),
-      userEmail
-    );
+    const restored = []; // Orphan repair is an explicit action, never a side effect of metadata sync.
 
     SpreadsheetApp.flush();
     return createJsonResponse({
@@ -412,8 +410,36 @@ function sameServerFinancialValues(a,b) {
     [amount(a),rate(a),total(a)].every(function(v){return isFinite(v);})&&amount(a)===amount(b)&&rate(a)===rate(b)&&total(a)===total(b);
 }
 
+function nativeServerMutationError(pocket, history, candidate, deletedId) {
+  if(isMoneyInvestment(pocket))return '';
+  const id=String(pocket.id||pocket.pocketId);
+  const rows=history.filter(function(t){return String(t.pocketId)===id;});
+  const target=String(candidate?candidate.id:deletedId);
+  const projected=rows.filter(function(t){return String(t.id)!==target;});
+  if(candidate)projected.push(candidate);
+  const dates=Array.from(new Set(rows.concat(projected).map(function(t){return String(t.date);}))).sort();
+  const balance=function(items,day){return items.filter(function(t){return String(t.date)<=day;}).reduce(function(sum,t){return sum+(t.type==='CREDIT'||t.type==='IN'?1:-1)*Number(t.nativeAmount!==undefined?t.nativeAmount:t.amount);},0);};
+  for(let i=0;i<dates.length;i++){const next=balance(projected,dates[i]);if(next<-.000001&&next<balance(rows,dates[i])-.000001)return 'Perubahan membuat saldo negatif pada '+dates[i]+'. Periksa transaksi setelah tanggal tersebut.';}
+  return '';
+}
+
+function pocketServerTypeMutationError(original,candidate,history) {
+  if(!original)return '';
+  const id=String(original.id||original.pocketId);
+  if(history.some(function(t){return String(t.pocketId)===id;})&&
+    (normalizePocketInstrumentType(original)!==normalizePocketInstrumentType(candidate)||String(original.currencyCode||original.currency).toUpperCase()!==String(candidate.currencyCode||candidate.currency).toUpperCase()))return 'Jenis dan mata uang kantong yang sudah memiliki transaksi memerlukan rekonsiliasi.';
+  return '';
+}
+
 function validateInvestmentTransaction(pocket, history, tx) {
-  if (!isMoneyInvestment(pocket)) { delete tx.costBasisReleasedIdr; return ''; }
+  const date=String(tx.date||'');
+  const parsed=new Date(date+'T00:00:00Z');
+  const amount=Number(tx.nativeAmount!==undefined?tx.nativeAmount:tx.amount);
+  const rate=Number(tx.exchangeRate!==undefined?tx.exchangeRate:tx.rate);
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!isFinite(parsed.getTime())||parsed.toISOString().slice(0,10)!==date)return 'Tanggal transaksi tidak valid.';
+  if(['CREDIT','IN','DEBET','OUT'].indexOf(String(tx.type))<0||!isFinite(amount)||amount<=0||!isFinite(rate)||rate<=0)return 'Nominal, kurs, atau jenis transaksi tidak valid.';
+  if(String(tx.currency||pocket.currencyCode||pocket.currency).toUpperCase()!==String(pocket.currencyCode||pocket.currency).toUpperCase())return 'Mata uang transaksi berbeda dari kantong.';
+  if (!isMoneyInvestment(pocket)) { delete tx.costBasisReleasedIdr; return nativeServerMutationError(pocket,history,tx); }
   const rows = history.filter(function(t) { return String(t.pocketId) === String(tx.pocketId); });
   const existing = rows.find(function(t) { return String(t.id) === String(tx.id); });
   if(existing && !existing.transferId && sameServerFinancialValues(existing,tx)){
@@ -431,7 +457,6 @@ function validateInvestmentTransaction(pocket, history, tx) {
   }
   if (rows.some(function(t) { return String(t.id) !== String(tx.id) && String(t.date) > String(tx.date); })) return 'Masukkan mutasi investasi secara berurutan.';
   const debit = tx.type === 'DEBET' || tx.type === 'OUT';
-  const amount = Number(tx.nativeAmount !== undefined ? tx.nativeAmount : tx.amount);
   if (!isFinite(amount) || amount <= 0) return 'Nominal investasi tidak valid.';
   if (!debit) { delete tx.costBasisReleasedIdr; return ''; }
   const valuationDate = pocket.lastPriceUpdatedAt ? Utilities.formatDate(new Date(pocket.lastPriceUpdatedAt), 'Asia/Jakarta', 'yyyy-MM-dd') : '';
@@ -446,7 +471,7 @@ function validateInvestmentTransaction(pocket, history, tx) {
 }
 
 function investmentServerDeletionError(pocket, transactions, id) {
-  if (!isMoneyInvestment(pocket)) return '';
+  if (!isMoneyInvestment(pocket)) return nativeServerMutationError(pocket,transactions,null,id);
   const rows = transactions.filter(function(t) { return String(t.pocketId) === String(pocket.id || pocket.pocketId); });
   if (!rows.some(hasReleasedCost)) return '';
   const target = rows.find(function(t) { return String(t.id) === String(id); });
@@ -857,9 +882,9 @@ function handleUpdateLedgerPocketMarketRate(payload) {
   const marketValueCurrency = sanitizeInput(payload.marketValueCurrency || 'IDR').toUpperCase();
   const lastPriceUpdatedAt = sanitizeInput(payload.lastPriceUpdatedAt || new Date().toISOString());
 
-  if (!userEmail || !pocketId || !isFinite(manualMarketRate) || manualMarketRate <= 0 ||
+  if (!userEmail || !pocketId || !isFinite(manualMarketRate) || manualMarketRate < 0 ||
       (hasMarketValue && (!isFinite(marketValue) || marketValue < 0)) ||
-      (hasNativeMarketValue && (!isFinite(marketValueNative) || marketValueNative <= 0 || !marketValueCurrency))) {
+      (hasNativeMarketValue && (!isFinite(marketValueNative) || marketValueNative < 0 || !marketValueCurrency))) {
     return createJsonResponse({ status: 'error', success: false, message: 'Data harga pasar tidak valid.' });
   }
 
@@ -935,7 +960,7 @@ function handleUpdateLedgerPocketMarketRate(payload) {
         }
         sheet.getRange(sheetRow, rateIndex + 1).setValue(manualMarketRate);
         if (hasMarketValue) sheet.getRange(sheetRow, marketValueIndex + 1).setValue(marketValue);
-        if (hasNativeMarketValue && isFinite(marketValueNative) && marketValueNative > 0) {
+        if (hasNativeMarketValue && isFinite(marketValueNative) && marketValueNative >= 0) {
           sheet.getRange(sheetRow, nativeValueIndex + 1).setValue(marketValueNative);
           sheet.getRange(sheetRow, marketCurrencyIndex + 1).setValue(marketValueCurrency);
         }
