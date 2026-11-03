@@ -77,6 +77,11 @@ test('legacy website can save Rp30,113,208 valuation without the new cashflow fi
   assert.equal(ctx.handleUpdatePocketMarketValue({...payload,valuationCashflowIdr:0},ss).success,false,'explicit stale anchor still rejected');
   const again = ctx.handleGetLedgerData(ss,email);
   assert.equal(again.pockets[0].marketValue,30_113_208,'failed update preserves saved valuation');
+  const zero=ctx.handleUpdatePocketMarketValue({...payload,marketValue:0,marketValueNative:0,manualMarketRate:0},ss);
+  assert.equal(zero.success,true,JSON.stringify(zero));
+  const zeroLoaded=ctx.handleGetLedgerData(ss,email);
+  assert.equal(zeroLoaded.pockets[0].marketValueNative,0);
+  assert.equal(investmentPosition(zeroLoaded.pockets[0],zeroLoaded.transactions.map((t:any)=>({...t,type:t.type==='IN'?'CREDIT':'DEBET',nativeAmount:t.amount,exchangeRate:t.rate,costIdr:t.totalIdr}))).marketValueIdr,0);
 });
 
 test('deployed unified engine integration: redemption, retry, snapshot, tenant boundaries', {skip: !fixture}, () => {
@@ -163,4 +168,19 @@ test('deployed unified engine integration: redemption, retry, snapshot, tenant b
   assert.equal(shopRows.length,3,'confirmed expense persists after reload without a duplicate');
   const shopPosition=investmentPosition({...shopping,...reload.pockets.find((p:any)=>p.id==='shopping')},shopRows);
   assert.equal(shopPosition.marketValueIdr,5_000_000);assert.equal(shopPosition.costBasisIdr,5_000_000);
+  const cash={...pocket,id:'cash-usd',currencyCode:'USD',instrumentType:'CASH_VALAS',marketValue:undefined,marketValueNative:undefined,lastPriceUpdatedAt:''};
+  pocketSheet.cells.push(pocketSheet.cells[0].map((header:string)=>ctx.pocketSyncValue(cash,header,email,2,'','2026-11-03T00:00:00Z')));
+  const credit={...row('cash-in','2026-11-01','CREDIT',100),pocketId:cash.id,currency:'USD',exchangeRate:17000,costIdr:1_700_000};
+  const debit={...row('cash-out','2026-11-02','DEBET',80),pocketId:cash.id,currency:'USD',exchangeRate:18000,costIdr:-1_440_000};
+  assert.equal(ctx.handleSaveLedgerTransaction({userEmail:email,transaction:credit},ss).success,true);
+  assert.equal(ctx.handleSaveLedgerTransaction({userEmail:email,transaction:debit},ss).success,true);
+  assert.equal(ctx.handleSaveLedgerTransaction({userEmail:email,transaction:{...credit,nativeAmount:50,costIdr:850_000}},ss).success,false,'cannot invalidate the later withdrawal');
+  assert.equal(ctx.handleDeleteLedgerTransaction({userEmail:email,transactionId:credit.id},ss).success,false,'cannot remove funding required by later withdrawals');
+  const beforeRename=ctx.handleGetLedgerData(ss,email).pockets.find((p:any)=>p.id==='junior');
+  const renamed=ctx.handleSyncLedgerPockets({userEmail:email,pockets:[{id:'junior',name:'Renamed Junior',currency:'IDR',instrumentType:'SINKING_FUND',sortOrder:1}]},ss);
+  assert.equal(renamed.success,true,JSON.stringify(renamed));
+  const afterRename=ctx.handleGetLedgerData(ss,email).pockets.find((p:any)=>p.id==='junior');
+  assert.equal(afterRename.marketValue,beforeRename.marketValue,'metadata sync preserves current valuation');
+  assert.equal(afterRename.valuationCashflowIdr,beforeRename.valuationCashflowIdr,'metadata sync preserves valuation anchor');
+  assert.equal(ctx.handleSyncLedgerPockets({userEmail:email,pockets:[{id:'cash-usd',name:'Changed currency',currency:'IDR',instrumentType:'CASH_VALAS'}]},ss).success,false,'cannot reinterpret existing USD history as IDR');
 });

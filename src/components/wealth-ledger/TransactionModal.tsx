@@ -183,7 +183,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   const cleanTotalIdr = Math.round(cleanAmount * cleanRate);
   const previewCostIdr = type === 'CREDIT' ? cleanTotalIdr : -cleanTotalIdr;
   const metadataOnly = !!editTransaction && sameFinancialValues(editTransaction,{
-    pocketId:activePocket?.id,date,type,nativeAmount:cleanAmount,exchangeRate:cleanRate,costIdr:previewCostIdr,
+    pocketId:activePocket?.id,date,type,nativeAmount:cleanAmount,exchangeRate:cleanRate,costIdr:editTransaction.costIdr,
   });
   const redemption = isInvestment && type === 'DEBET' && !metadataOnly
     ? redemptionPreview(activePocket, transactions.filter(t => t.id !== editTransaction?.id), cleanAmount) : null;
@@ -262,7 +262,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     }
 
     const finalTotalIdr = Math.round(finalAmount * finalRate);
-    const finalCostIdr = type === 'CREDIT' ? finalTotalIdr : -finalTotalIdr;
+    const finalCostIdr = metadataOnly ? editTransaction!.costIdr : type === 'CREDIT' ? finalTotalIdr : -finalTotalIdr;
 
     const custodian =
       activePocket?.defaultCustodian ||

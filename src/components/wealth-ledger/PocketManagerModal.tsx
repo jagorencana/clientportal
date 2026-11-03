@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { AssetPocket, InstrumentType, LedgerTransaction } from '../../types/ledger';
 import { getIsoCurrencyMeta } from '../../utils/ratesApi';
 import { getPocketTypeLabel } from '../../utils/formatters';
@@ -23,7 +23,7 @@ interface PocketManagerModalProps {
   onClose: () => void;
   pockets: AssetPocket[];
   transactions: LedgerTransaction[];
-  onSavePocket: (pocket: AssetPocket) => void;
+  onSavePocket: (pocket: AssetPocket) => Promise<boolean>;
   onDeletePocket: (pocketId: string) => Promise<boolean>;
   isDeletingPocket?: boolean;
 }
@@ -71,6 +71,9 @@ export const PocketManagerModal: React.FC<PocketManagerModalProps> = ({
   const [investFormat, setInvestFormat] = useState<'IDR' | 'UNIT'>('IDR');
   const [custodian, setCustodian] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
+  const [isSavingPocket,setIsSavingPocket]=useState(false);
+  const saveRef=useRef(false);
+  const draftIdRef=useRef('');
 
   // Helper untuk membersihkan dan mereset form ke kondisi awal kosong
   const resetForm = () => {
@@ -93,16 +96,20 @@ export const PocketManagerModal: React.FC<PocketManagerModalProps> = ({
   }, [isOpen]);
 
   const handleOpenAddForm = () => {
+    if(saveRef.current)return;
     resetForm();
+    draftIdRef.current='pocket-'+crypto.randomUUID();
     setIsFormOpen(true);
   };
 
   const handleCloseForm = () => {
+    if(saveRef.current)return;
     resetForm();
     setIsFormOpen(false);
   };
 
   const handleCloseModal = () => {
+    if(saveRef.current)return;
     resetForm();
     setIsFormOpen(false);
     onClose();
@@ -150,8 +157,9 @@ export const PocketManagerModal: React.FC<PocketManagerModalProps> = ({
     setValasCurrency(code);
   };
 
-  const handleSubmitForm = (e: React.FormEvent) => {
+  const handleSubmitForm = async (e: React.FormEvent) => {
     e.preventDefault();
+    if(saveRef.current)return;
     if (!name.trim()) {
       setFormError('Nama kantong aset wajib diisi.');
       return;
@@ -197,8 +205,10 @@ export const PocketManagerModal: React.FC<PocketManagerModalProps> = ({
     const existingPocket = editingPocketId
       ? pockets.find((p) => p.id === editingPocketId)
       : undefined;
+    if(existingPocket?.instrumentType==='SAHAM_ETF'&&mainCategory==='INVESTMENT')finalInstrumentType='SAHAM_ETF';
+    if(!editingPocketId&&!draftIdRef.current)draftIdRef.current='pocket-'+crypto.randomUUID();
     const pocketData: AssetPocket = {
-      id: editingPocketId || `pocket-${finalCurrencyCode.toLowerCase()}-${Date.now().toString().slice(-4)}`,
+      id: editingPocketId || draftIdRef.current,
       name: name.trim(),
       currencyCode: finalCurrencyCode,
       instrumentType: finalInstrumentType,
@@ -225,9 +235,12 @@ export const PocketManagerModal: React.FC<PocketManagerModalProps> = ({
       isDefault: editingPocketId ? pockets.find((p) => p.id === editingPocketId)?.isDefault : false,
     };
 
-    onSavePocket(pocketData);
-    resetForm();
-    setIsFormOpen(false);
+    saveRef.current=true;setIsSavingPocket(true);setFormError(null);
+    try{
+      if(!await onSavePocket(pocketData)){setFormError('Kantong belum tersimpan. Silakan coba lagi.');return;}
+      resetForm();setIsFormOpen(false);
+    }catch(error:any){setFormError(error?.message||'Kantong belum tersimpan. Isian tetap tersedia.');}
+    finally{saveRef.current=false;setIsSavingPocket(false);}
   };
 
   const handleDelete = (pocket: AssetPocket) => {
@@ -333,7 +346,7 @@ export const PocketManagerModal: React.FC<PocketManagerModalProps> = ({
                 </div>
               )}
 
-              <form onSubmit={handleSubmitForm} className="space-y-5">
+              <form onSubmit={handleSubmitForm}><fieldset disabled={isSavingPocket} className="space-y-5">
                 {/* Langkah 1: Pilih Jenis Kantong (Radio Selector Terstruktur) */}
                 <div>
                   <div className="flex items-center justify-between mb-2">
@@ -614,42 +627,9 @@ export const PocketManagerModal: React.FC<PocketManagerModalProps> = ({
 
                         <div>
                           <label className="block text-xs font-semibold text-slate-700 mb-1">
-                            Format Tampilan Saldo
+                            Format Saldo
                           </label>
-                          <div className="grid grid-cols-2 gap-2">
-                            <button
-                              type="button"
-                              disabled={Boolean(editingPocketId && transactions.some((t) => t.pocketId === editingPocketId))}
-                              onClick={() => setInvestFormat('IDR')}
-                              className={`py-1.5 px-3 rounded-lg text-xs font-bold transition border ${
-                                editingPocketId && transactions.some((t) => t.pocketId === editingPocketId)
-                                  ? 'opacity-60 cursor-not-allowed'
-                                  : 'cursor-pointer'
-                              } ${
-                                investFormat === 'IDR'
-                                  ? 'bg-[#32A89C] text-white border-[#32A89C]'
-                                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                              }`}
-                            >
-                              Nominal Mata Uang (Rp)
-                            </button>
-                            <button
-                              type="button"
-                              disabled={Boolean(editingPocketId && transactions.some((t) => t.pocketId === editingPocketId))}
-                              onClick={() => setInvestFormat('UNIT')}
-                              className={`py-1.5 px-3 rounded-lg text-xs font-bold transition border ${
-                                editingPocketId && transactions.some((t) => t.pocketId === editingPocketId)
-                                  ? 'opacity-60 cursor-not-allowed'
-                                  : 'cursor-pointer'
-                              } ${
-                                investFormat === 'UNIT'
-                                  ? 'bg-[#32A89C] text-white border-[#32A89C]'
-                                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                              }`}
-                            >
-                              Unit Penyertaan (Unit)
-                            </button>
-                          </div>
+                          <p className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs text-slate-700">{investFormat==='UNIT' ? 'Unit (catatan lama — perlu diperiksa)' : `Nominal ${investCurrencyBasis}, sesuai aplikasi investasi`}</p>
                         </div>
                       </div>
 
@@ -816,11 +796,11 @@ export const PocketManagerModal: React.FC<PocketManagerModalProps> = ({
                       type="submit"
                       className="px-5 py-2 text-xs font-bold text-white bg-[#32A89C] hover:bg-[#288a80] rounded-xl shadow-xs transition cursor-pointer active:scale-[0.99]"
                     >
-                      {editingPocketId ? 'Simpan Perubahan' : 'Buat Kantong Aset'}
+                      {isSavingPocket ? 'Menyimpan…' : editingPocketId ? 'Simpan Perubahan' : 'Buat Kantong Aset'}
                     </button>
                   </div>
                 </div>
-              </form>
+              </fieldset></form>
             </div>
           ) : null}
 

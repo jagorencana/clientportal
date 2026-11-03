@@ -31,9 +31,14 @@ replaceOnce('    const sheet = ensureLedgerTransactionSheet(ss);', `    const po
     if (accountingError) return respondJson({ status: 'error', success: false, message: accountingError });
     const sheet = ensureLedgerTransactionSheet(ss);`);
 replaceOnce('  if (key === "sortorder") return Number(pocket.sortOrder) || position + 1;', '  if (key === "sortorder") return Number(pocket.sortOrder) || position + 1;\n  if (key === "valuationcashflowidr") return pocket.valuationCashflowIdr === undefined ? existingRow : Number(pocket.valuationCashflowIdr);');
+replaceOnce('marketValueNative <= 0', 'marketValueNative < 0');
+replaceOnce('marketValueNative > 0 ? marketValueNative : undefined', 'marketValueNative >= 0 ? marketValueNative : undefined');
+replaceOnce('nativeValue > 0 ? nativeValue : existingRow', 'nativeValue >= 0 ? nativeValue : existingRow');
 replaceOnce('    const incoming = {};', `    const accountingData = accountingTenantData(ss, targetEmail);
     for (const pocket of pockets) {
       const original = accountingData.pockets.find(function(p) { return String(p.id) === String(pocket.id || pocket.pocketId); });
+      const typeError=pocketServerTypeMutationError(original,pocket,accountingData.transactions);
+      if(typeError)return respondJson({status:'error',success:false,message:typeError});
       if(original && accountingData.transactions.some(function(t){return String(t.pocketId)===String(original.id)&&t.transferId;}) && (normalizePocketInstrumentType(original)!==normalizePocketInstrumentType(pocket)||String(original.currency||original.currencyCode)!==String(pocket.currency||pocket.currencyCode))) return respondJson({status:'error',success:false,message:'Batalkan perpindahan terkait sebelum mengubah jenis atau mata uang kantong.'});
       if (original && isMoneyInvestment(original) && !isMoneyInvestment(pocket) && accountingData.transactions.some(function(t) {
         return String(t.pocketId) === String(original.id) && hasReleasedCost(t);

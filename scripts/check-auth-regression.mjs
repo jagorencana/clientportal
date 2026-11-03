@@ -80,7 +80,7 @@ expect(
   ledgerService.includes("const LEDGER_CACHE_PREFIX = 'wl_pockets_cache'") &&
     ledgerService.includes('LEGACY_LEDGER_CACHE_PREFIX') &&
     ledgerService.includes('cacheTenantEmail: email') &&
-    ledgerService.includes("Cache Wealth Ledger ditolak karena tenant tidak cocok"),
+    ledgerService.includes('cacheBelongsToTenant(cached,email)'),
   'Cache key Wealth Ledger atau migrasi cache lama hilang'
 );
 expect(
@@ -185,7 +185,7 @@ expect(
 );
 expect(
   ledgerService.includes("rawMarketValue === ''") &&
-    ledgerService.includes('parsedMarketValue > 0') &&
+    ledgerService.includes('parsedMarketValue >= 0') &&
     ledgerService.includes('marketValueNative') &&
     wealthLedgerView.includes('valuationInputRate(pocket,liveFxRates)') &&
     wealthLedgerView.includes("pocket.instrumentType === 'SINKING_FUND'"),
@@ -222,8 +222,8 @@ expect(
 expect(
   wealthLedgerView.includes("showToast('Gagal menghapus kantong dari Google Sheets, silakan coba lagi')") &&
     wealthLedgerView.includes('void loadLedgerData(false, true)') &&
-    wealthLedgerView.includes('relatedTransactions.forEach'),
-  'Delete kantong tidak memiliki toast, re-fetch sukses, dan rollback defensif'
+    wealthLedgerView.includes('updateTransactions(transactionsRef.current.filter(t=>t.pocketId!==normalizedPocketId))'),
+  'Delete kantong tidak memiliki konfirmasi, toast, dan re-fetch sukses'
 );
 
 const pocketManagerModal = read('src/components/wealth-ledger/PocketManagerModal.tsx');

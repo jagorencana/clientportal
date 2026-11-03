@@ -27,7 +27,7 @@ export function foreignInvestmentValuation(pocket:AssetPocket,rows:LedgerTransac
   const dated=/^\d{4}-\d{2}-\d{2}$/.test(day);
   const later=dated?rows.filter(t=>t.date>day):[];
   const credit=(t:LedgerTransaction)=>t.type==='CREDIT'||String(t.type)==='IN';
-  const needsRefresh=!dated || !Number.isFinite(value)||value<=0 || currency!==pocket.currencyCode || fx<=0 ||
+  const needsRefresh=!dated || !Number.isFinite(value)||value<0 || currency!==pocket.currencyCode || fx<=0 ||
     rows.some(t=>t.date===day) || later.some(t=>!credit(t));
   if(needsRefresh)return {needsRefresh:true,marketValueIdr:undefined,adjustedNative:undefined,addedNative:0};
   const addedNative=later.reduce((sum,t)=>sum+Number(t.nativeAmount??t.amount??0),0);

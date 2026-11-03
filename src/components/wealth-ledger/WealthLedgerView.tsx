@@ -37,13 +37,13 @@ import {
   deleteRemoteTransaction,
   deleteRemotePocketCascade,
   updateRemotePocketMarketRate,
-  repairRemoteOrphanPockets,
   setCurrentUserEmail,
   saveRemoteTransfer,
   cancelRemoteTransfer,
 } from '../../services/ledgerApiService';
 import { exportLedgerTransactionsToCsv } from '../../services/reportService';
 import { investmentDeletionError, investmentMutationError, isRupiahInvestment, netCashflow, pocketTransactions, redemptionPreview, sameFinancialValues } from '../../utils/investmentAccounting';
+import {auditLedger,nativeMutationError,type LedgerIssue} from '../../utils/ledgerIntegrity';
 import { GlobalMetrics } from './GlobalMetrics';
 import {TransferModal} from './TransferModal';
 import {prepareTransfer,transferDependencyError,TransferInput} from '../../utils/ledgerTransfers';
@@ -69,7 +69,7 @@ import {
 export type MainViewMode = 'POCKETS' | 'GLOBAL_LEDGER';
 
 const isLedgerMutationSuccess = (result: any): boolean =>
-  result?.success === true || result?.status === 'success';
+  result?.success !== false && result?.status !== 'error' && (result?.success === true || result?.status === 'success');
 
 export interface WealthLedgerProps {
   currentUserEmail?: string;
@@ -206,6 +206,8 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
   const [isDeletingPocket, setIsDeletingPocket] = useState(false);
   const [isLedgerLoading, setIsLedgerLoading] = useState(!initialLedgerCache);
   const [ledgerLoadError, setLedgerLoadError] = useState<string | null>(null);
+  const [ledgerDataIssues,setLedgerDataIssues]=useState<LedgerIssue[]>(initialLedgerCache?.integrityIssues||[]);
+  const auditSourceRef=useRef<any>(initialLedgerCache);
   const [isUsingLedgerCache, setIsUsingLedgerCache] = useState(Boolean(initialLedgerCache));
   const [lastSheetsSyncTime, setLastSheetsSyncTime] = useState<string | null>(() => {
     if (!initialLedgerCache?.cacheSavedAt) return null;
@@ -314,6 +316,8 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
       setTransferReady(!usingCache && data.ledgerTransferVersion === 1);
       setIsUsingLedgerCache(usingCache);
 
+      auditSourceRef.current=data;
+      setLedgerDataIssues(data.integrityIssues||auditLedger(data.pockets||[],data.transactions||[]).issues);
       const remotePockets = Array.isArray(data.pockets) ? data.pockets : [];
       const activePocketIds = new Set(
         remotePockets.map((pocket) => String(pocket.id || '').trim()).filter(Boolean)
@@ -335,10 +339,6 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
           pockets: remotePockets,
           transactions: remoteTransactions,
         });
-      }
-      if (!usingCache) {
-        // Maintenance berjalan setelah snapshot utama tersedia agar tidak memperlambat initial load.
-        void repairRemoteOrphanPockets(email);
       }
       setActivePocketId((current) =>
         current && activePocketIds.has(current) ? current : null
@@ -407,6 +407,8 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
         )
       : [];
 
+    setLedgerDataIssues(cached?.integrityIssues||auditLedger(cachedPockets,cached?.transactions||[]).issues);
+    auditSourceRef.current=cached;
     updatePockets(cachedPockets);
     updateTransactions(cachedTransactions);
     setActivePocketId(null);
@@ -659,6 +661,8 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
     if(transferError)throw new Error(transferError);
     const pocket = pocketsRef.current.find(p => p.id === tx.pocketId);
     const isInvestment = pocket && isRupiahInvestment(pocket);
+    const nativeError=pocket&&!metadataOnly?nativeMutationError(pocket,transactionsRef.current,tx):'';
+    if(nativeError)throw new Error(nativeError);
     if (isInvestment && !metadataOnly) {
       const history = transactionsRef.current;
       const mutationError = investmentMutationError(pocket, history, tx);
@@ -729,29 +733,26 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
     if(transferError){showToast(transferError);return;}
     const pocket = pockets.find(p => p.id === tx?.pocketId);
     if (pocket && !tx?.transferId) {
+      const nativeError=nativeMutationError(pocket,transactionsRef.current,null,id);
+      if(nativeError){showToast(nativeError);return;}
       const deletionError = investmentDeletionError(pocket, transactions, id);
       if (deletionError) { showToast(deletionError); return; }
     }
     const removed = transactions.filter(t=>tx?.transferId?t.transferId===tx.transferId:t.id===id);
-    const updated = transactions.filter((t) => !removed.some(r=>r.id===t.id));
     const mutationTenant = effectiveEmail;
     ledgerMutationVersionRef.current += 1;
     beginLedgerWrite(mutationTenant);
-    updateTransactions(updated);
     try {
       const result = await enqueueLedgerWrite(() => tx?.transferId?cancelRemoteTransfer(tx.transferId,mutationTenant):deleteRemoteTransaction(id, mutationTenant));
       if (activeTenantEmailRef.current !== mutationTenant) return;
       if (!isLedgerMutationSuccess(result)) {
         throw new Error(result?.message || 'Google Sheets tidak mengonfirmasi penghapusan transaksi.');
       }
+      ledgerMutationVersionRef.current+=1;
+      updateTransactions(transactionsRef.current.filter(t=>!removed.some(r=>r.id===t.id)));
       showToast(tx?.transferId?'Perpindahan dibatalkan pada kedua kantong.':`Baris transaksi "${tx?.description || id}" telah dihapus.`);
     } catch (error: any) {
       if (activeTenantEmailRef.current !== mutationTenant) return;
-      ledgerMutationVersionRef.current += 1;
-      const currentTransactions = transactionsRef.current;
-      updateTransactions(
-        [...removed.filter(r=>!currentTransactions.some(t=>t.id===r.id)),...currentTransactions]
-      );
       showToast(error?.message || 'Transaksi gagal dihapus dari Google Sheets.');
     } finally {
       finishLedgerWrite(mutationTenant);
@@ -761,20 +762,19 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
   const handleSaveTransfer = async (input:TransferInput):Promise<boolean> => {
     if(!transferReady){showToast('Layanan perpindahan belum diperbarui.');return false;}
     let legs:LedgerTransaction[];
-    const previousPair=transactionsRef.current.filter(t=>t.transferId===input.id);
     try{legs=prepareTransfer(pocketsRef.current,transactionsRef.current.filter(t=>t.transferId!==input.id),input);}catch(e:any){showToast(e.message);return false;}
     const tenant=effectiveEmail;
     ledgerMutationVersionRef.current+=1;
     beginLedgerWrite(tenant);
-    updateTransactions([...legs,...transactionsRef.current.filter(t=>t.transferId!==input.id)]);
     try{
       const result:any=await enqueueLedgerWrite(()=>saveRemoteTransfer(input,tenant));
       if(activeTenantEmailRef.current!==tenant)return false;
       if(!isLedgerMutationSuccess(result)||!Array.isArray(result.transactions)||result.transactions.length!==2)throw Error(result?.message||'Kedua sisi perpindahan belum dikonfirmasi.');
+      ledgerMutationVersionRef.current+=1;
       updateTransactions([...result.transactions,...transactionsRef.current.filter(t=>t.transferId!==input.id)]);
       showToast('Perpindahan tersimpan pada kedua kantong.');return true;
     }catch(e:any){
-      if(activeTenantEmailRef.current===tenant){ledgerMutationVersionRef.current+=1;updateTransactions([...previousPair,...transactionsRef.current.filter(t=>t.transferId!==input.id)]);showToast(e.message||'Perpindahan belum dikonfirmasi. Coba lagi dengan data yang sama.');}
+      if(activeTenantEmailRef.current===tenant){showToast(e.message||'Perpindahan belum dikonfirmasi. Coba lagi dengan data yang sama.');}
       return false;
     }finally{finishLedgerWrite(tenant);}
   };
@@ -789,7 +789,7 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
     const normalizedPocketId = String(pocketId || '').trim();
     const rate = Number(manualMarketRate);
     const totalMarketValue = Number(marketValue);
-    if (!normalizedPocketId || !Number.isFinite(rate) || rate <= 0 || !Number.isFinite(totalMarketValue) || totalMarketValue < 0 || !effectiveEmail) {
+    if (!normalizedPocketId || !Number.isFinite(rate) || rate < 0 || !Number.isFinite(totalMarketValue) || totalMarketValue < 0 || !effectiveEmail) {
       showToast('Harga pasar dan email klien harus valid.');
       return false;
     }
@@ -799,24 +799,11 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
       ? netCashflow(pocketTransactions(previousPocket, transactionsRef.current)) : undefined;
     const mutationTenant = effectiveEmail;
     const lastPriceUpdatedAt = new Date().toISOString();
-    const updatedPockets = pockets.map((pocket) =>
-      String(pocket.id || '').trim() === normalizedPocketId
-        ? {
-            ...pocket,
-            manualMarketRate: rate,
-            marketValue: totalMarketValue,
-            marketValueNative,
-            marketValueCurrency,
-            valuationCashflowIdr,
-            lastPriceUpdatedAt,
-            updatedAt: lastPriceUpdatedAt,
-          }
-        : pocket
-    );
-
+    const updatedPocket = {
+      ...previousPocket!,manualMarketRate:rate,marketValue:totalMarketValue,marketValueNative,marketValueCurrency,valuationCashflowIdr,lastPriceUpdatedAt,updatedAt:lastPriceUpdatedAt,
+    };
     ledgerMutationVersionRef.current += 1;
     beginLedgerWrite(mutationTenant);
-    updatePockets(updatedPockets);
     try {
       const result = await enqueueLedgerWrite(() => updateRemotePocketMarketRate(
         normalizedPocketId,
@@ -832,13 +819,12 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
       if (!isLedgerMutationSuccess(result)) {
         throw new Error(result?.message || 'Harga pasar gagal disimpan ke Google Sheets.');
       }
-      showToast('Harga pasar / NAB berhasil diperbarui.');
+      ledgerMutationVersionRef.current+=1;
+      updatePockets(pocketsRef.current.map(p=>p.id===normalizedPocketId?{...p,...updatedPocket}:p));
+      showToast('Nilai pasar berhasil diperbarui.');
       return true;
     } catch (error: any) {
       if (activeTenantEmailRef.current !== mutationTenant) return false;
-      ledgerMutationVersionRef.current += 1;
-      const withoutFailedWrite = pocketsRef.current.filter((pocket) => pocket.id !== normalizedPocketId);
-      updatePockets(previousPocket ? [...withoutFailedWrite, previousPocket] : withoutFailedWrite);
       showToast(error?.message || 'Harga pasar gagal disimpan ke Google Sheets.');
       return false;
     } finally {
@@ -847,61 +833,28 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
   };
 
   // Pocket Management Handlers
-  const handleSavePocket = async (pocketToSave: AssetPocket) => {
-    const original = pocketsRef.current.find(p => p.id === pocketToSave.id);
-    if(original && transactionsRef.current.some(t=>t.pocketId===original.id&&t.transferId) &&
+  const handleSavePocket = async (pocketToSave: AssetPocket):Promise<boolean> => {
+    const original=pocketsRef.current.find(p=>p.id===pocketToSave.id);
+    if(original&&transactionsRef.current.some(t=>t.pocketId===original.id)&&
       (original.currencyCode!==pocketToSave.currencyCode||original.instrumentType!==pocketToSave.instrumentType)){
-      showToast('Batalkan perpindahan terkait sebelum mengubah jenis atau mata uang kantong.');return;
+      throw new Error('Jenis dan mata uang kantong yang sudah memiliki transaksi memerlukan rekonsiliasi.');
     }
-    if (original && isRupiahInvestment(original) &&
-      pocketTransactions(original, transactionsRef.current).some(t => t.costBasisReleasedIdr !== undefined) &&
-      (!isRupiahInvestment(pocketToSave) || original.currencyCode !== pocketToSave.currencyCode)) {
-      showToast('Jenis pencatatan kantong dengan pencairan tercatat tidak dapat diubah tanpa rekonsiliasi.');
-      return;
-    }
-    const existingIndex = pockets.findIndex((p) => p.id === pocketToSave.id);
-    let updated: AssetPocket[];
-
-    if (existingIndex >= 0) {
-      updated = [...pockets];
-      updated[existingIndex] = pocketToSave;
-    } else {
-      updated = [...pockets, pocketToSave];
-    }
-
-    if (pocketToSave.manualMarketPrice) {
-      const pCode = (pocketToSave.currencyCode || 'IDR').toUpperCase();
-      updateManualPrices({
-        ...manualPrices,
-        [pCode]: pocketToSave.manualMarketPrice,
-      });
-    }
-
-    const previousPocket = existingIndex >= 0 ? pockets[existingIndex] : undefined;
-    const mutationTenant = effectiveEmail;
-    ledgerMutationVersionRef.current += 1;
-    beginLedgerWrite(mutationTenant);
-    updatePockets(updated);
-    try {
-      const result = await enqueueLedgerWrite(() => syncRemotePockets(updated, mutationTenant));
-      if (activeTenantEmailRef.current !== mutationTenant) return;
-      if (!isLedgerMutationSuccess(result)) {
-        throw new Error(result?.message || 'Google Sheets tidak mengonfirmasi penyimpanan kantong.');
-      }
-      showToast(
-        existingIndex >= 0
-          ? `Kantong "${pocketToSave.name}" berhasil diperbarui.`
-          : `Kantong baru "${pocketToSave.name}" berhasil disimpan ke Google Sheets.`
-      );
-    } catch (error: any) {
-      if (activeTenantEmailRef.current !== mutationTenant) return;
-      ledgerMutationVersionRef.current += 1;
-      const withoutFailedWrite = pocketsRef.current.filter((pocket) => pocket.id !== pocketToSave.id);
-      updatePockets(previousPocket ? [...withoutFailedWrite, previousPocket] : withoutFailedWrite);
-      showToast(error?.message || 'Kantong gagal disimpan ke Google Sheets. Perubahan dibatalkan.');
-    } finally {
-      finishLedgerWrite(mutationTenant);
-    }
+    const {manualMarketRate,manualMarketPrice,marketValue,marketValueNative,marketValueCurrency,valuationCashflowIdr,lastPriceUpdatedAt,...metadata}=pocketToSave;
+    const record={...metadata,sortOrder:original?.sortOrder??pocketsRef.current.length+1};
+    const tenant=effectiveEmail;
+    ledgerMutationVersionRef.current+=1;
+    beginLedgerWrite(tenant);
+    try{
+      const result=await enqueueLedgerWrite(()=>syncRemotePockets([record],tenant));
+      if(activeTenantEmailRef.current!==tenant)return false;
+      if(!isLedgerMutationSuccess(result))throw new Error(result?.message||'Kantong belum tersimpan.');
+      const current=pocketsRef.current;
+      updatePockets(current.some(p=>p.id===record.id)?current.map(p=>p.id===record.id?{...p,...record}:p):[...current,record as AssetPocket]);
+      ledgerMutationVersionRef.current+=1;
+      showToast('Kantong berhasil disimpan.');
+      return true;
+    }catch(error:any){throw new Error(error?.message||'Kantong belum tersimpan. Isian tetap tersedia.');}
+    finally{finishLedgerWrite(tenant);}
   };
 
   const handleDeletePocket = async (pocketId: string) => {
@@ -917,27 +870,10 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
     const relatedTransactions = transactions.filter(
       (tx) => String(tx.pocketId || '').trim() === normalizedPocketId
     );
-    const remainingPockets = pockets.filter(
-      (p) => String((p as AssetPocket & { pocketId?: string }).pocketId || p.id).trim() !== normalizedPocketId
-    );
-
-    const remainingTransactions = transactions.filter(
-      (tx) => String(tx.pocketId || '').trim() !== normalizedPocketId
-    );
-
-    const previousActivePocketId = activePocketId;
     const mutationTenant = effectiveEmail;
 
     ledgerMutationVersionRef.current += 1;
     beginLedgerWrite(mutationTenant);
-
-    // Optimistic state agar kartu dan mutasinya langsung hilang dari UI.
-    updatePockets(remainingPockets);
-    updateTransactions(remainingTransactions);
-
-    if (activePocketId === normalizedPocketId) {
-      setActivePocketId(null);
-    }
 
     setIsDeletingPocket(true);
     let remoteDeleteSucceeded = false;
@@ -952,6 +888,10 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
         throw new Error(deleteResult?.message || 'Kantong gagal dihapus dari Google Sheets.');
       }
 
+      updatePockets(pocketsRef.current.filter(p=>p.id!==normalizedPocketId));
+      updateTransactions(transactionsRef.current.filter(t=>t.pocketId!==normalizedPocketId));
+      setActivePocketId(current=>current===normalizedPocketId?null:current);
+      ledgerMutationVersionRef.current+=1;
       showToast(
         `Kantong ${target.name} dan ${relatedTransactions.length} transaksi terkait berhasil dihapus permanen.`
       );
@@ -959,19 +899,6 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
       return true;
     } catch {
       if (activeTenantEmailRef.current !== mutationTenant) return false;
-      // Rollback segera bila backend gagal/timeout agar data lokal tidak tampak terhapus palsu.
-      const currentPockets = pocketsRef.current;
-      updatePockets(
-        currentPockets.some((pocket) => pocket.id === target.id)
-          ? currentPockets
-          : [...currentPockets, target]
-      );
-      const restoredTransactions = new Map(
-        transactionsRef.current.map((transaction) => [transaction.id, transaction])
-      );
-      relatedTransactions.forEach((transaction) => restoredTransactions.set(transaction.id, transaction));
-      updateTransactions(Array.from(restoredTransactions.values()));
-      setActivePocketId(previousActivePocketId);
       showToast('Gagal menghapus kantong dari Google Sheets, silakan coba lagi');
       return false;
     } finally {
@@ -1229,6 +1156,7 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
 
         <div className={isLedgerLoading ? 'hidden' : 'contents'}>
 
+        {ledgerDataIssues.length>0 && <section className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900"><p>{ledgerDataIssues.length} catatan perlu diperiksa. Ringkasan sementara belum dapat dipastikan.</p><ul className="mt-2 list-disc pl-4">{[...new Set(ledgerDataIssues.map(i=>i.message))].slice(0,5).map(message=><li key={message}>{message}</li>)}</ul><button type="button" className="mt-2 font-semibold underline" onClick={()=>{const blob=new Blob([JSON.stringify({issues:ledgerDataIssues,pockets:auditSourceRef.current?.pockets,transactions:auditSourceRef.current?.sourceTransactions||auditSourceRef.current?.transactions},null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download='pemeriksaan-wealth-ledger.json';link.click();URL.revokeObjectURL(url);}}>Unduh catatan pemeriksaan</button></section>}
         {/* A. Ringkasan utama dan alokasi kelas aset */}
         <GlobalMetrics
           summary={globalSummary}

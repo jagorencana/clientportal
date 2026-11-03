@@ -7,6 +7,19 @@ export function valuationInputRate(p:AssetPocket,rates:Record<string,number>){
   return Number(rates[code]||0);
 }
 
+/** Potential P/L is the difference between the displayed position value and its
+ * acquisition cost, not a promise of future returns or a realized cash receipt. */
+export function pocketPotentialPnl(p:CurrencyPocketSummary) {
+  const manual=[p.manualMarketValue,p.manualMarketValueNative,p.manualMarketRate].some(v=>v!==undefined&&Number.isFinite(v)&&v>=0);
+  const fx=Number.isFinite(p.fxRateToIdr)&&p.fxRateToIdr!>0;
+  const cash=p.instrumentType==='CASH_VALAS'||!p.instrumentType;
+  const hasBasis=manual||(cash&&fx)||(p.currency!=='IDR'&&p.currency!=='XAU'&&fx);
+  const amount=hasBasis&&Number.isFinite(p.marketValueIdr)&&Number.isFinite(p.totalCostBasisIdr)?p.marketValueIdr-p.totalCostBasisIdr:null;
+  return {amount,percent:amount!==null&&p.totalCostBasisIdr>0?amount/p.totalCostBasisIdr*100:null,
+    estimated:!!p.valuationNeedsRefresh||!reportValuationKnown(p),
+    note:amount===null?'Nilai pasar belum diisi.':!manual&&!cash?'Perkiraan dari saldo dan kurs.':p.valuationNeedsRefresh||!reportValuationKnown(p)?'Estimasi dari nilai terakhir.':'Nilai investasi dikurangi modal.'};
+}
+
 export function reportFxRate(p: CurrencyPocketSummary, rates: Record<string,number>) {
   const code=p.currency.trim().toUpperCase();
   if (code==='IDR') return 1;
@@ -18,7 +31,7 @@ export function reportFxRate(p: CurrencyPocketSummary, rates: Record<string,numb
 export function reportValuationKnown(p:CurrencyPocketSummary,cutoff=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Jakarta'})) {
   if(p.valuationNeedsRefresh)return false;
   if(p.instrumentType==='CASH_VALAS') return Number.isFinite(p.fxRateToIdr) && p.fxRateToIdr!>0;
-  const hasValue=[p.manualMarketValue,p.manualMarketValueNative,p.manualMarketRate].some(v=>Number.isFinite(v)&&v!>0);
+  const hasValue=[p.manualMarketValue,p.manualMarketValueNative,p.manualMarketRate].some(v=>v!==undefined&&Number.isFinite(v)&&v!>=0);
   const valuationDay=p.lastPriceUpdatedAt ? new Date(p.lastPriceUpdatedAt).toLocaleDateString('en-CA',{timeZone:'Asia/Jakarta'}) : '';
   return hasValue && !!valuationDay && valuationDay<=cutoff;
 }
