@@ -8,9 +8,9 @@ export function RealizedPerformance({transactions,floating,estimated=false}:{tra
   const amount=(value:number)=> <strong className={`text-xl tabular-nums ${value<0?'text-rose-700':'text-emerald-700'}`}>{formatIdr(value)}</strong>;
   return <section aria-label="Penjelasan untung rugi" className="my-4 space-y-3">
     <div className="grid gap-3 md:grid-cols-3">
-      <div className="rounded-xl bg-slate-50 p-3"><p className="text-xs font-semibold">Laba/Rugi Belum Dicairkan</p>{amount(floating)}<p className="text-[11px] text-slate-600">Nilai aset − modal tersisa.</p></div>
+      <div className="rounded-xl bg-slate-50 p-3"><p className="text-xs font-semibold">Potensi Untung/Rugi</p>{amount(floating)}<p className="text-[11px] text-slate-600">Nilai investasi dikurangi modal.</p></div>
       <div className="rounded-xl bg-teal-50 p-3"><p className="text-xs font-semibold">Laba/Rugi Pencairan</p>{rows.length?amount(total):<strong className="text-xl">Belum ada data</strong>}<p className="text-[11px] text-slate-600">Pencairan dikurangi modal yang dicairkan.</p></div>
-      <div className="rounded-xl bg-slate-50 p-3"><p className="text-xs font-semibold">Total Hasil</p>{amount(floating+total)}<p className="text-[11px] text-slate-600">Belum dicairkan + laba/rugi pencairan. Tidak ditambahkan lagi ke saldo.</p></div>
+      <div className="rounded-xl bg-slate-50 p-3"><p className="text-xs font-semibold">Total Hasil</p>{amount(floating+total)}<p className="text-[11px] text-slate-600">Potensi untung/rugi + hasil pencairan. Tidak ditambahkan lagi ke saldo.</p></div>
     </div>
     <p className="text-[11px] text-slate-500">Sejak awal pencatatan.{estimated ? ' * Sebagian nilai masih perkiraan.' : ''} Dividen, bunga, biaya, dan pajak terpisah belum termasuk.</p>
     {!rows.length && <p className="text-[11px] text-slate-500">Belum ada data laba/rugi pencairan.</p>}

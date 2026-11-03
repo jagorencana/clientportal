@@ -2,7 +2,7 @@
 
 ## Scope and status
 
-Code audit and synthetic regression testing cover cash/FX, nominal-IDR investments, sinking funds, physical assets, shares/ETF and gold. This is **not** certification that the production account balances match bank/broker statements. Production account data has not yet been read: direct Sheets access returned HTTP 403, native browser access timed out awaiting app permission, and the account email is pending. No production transactions were modified.
+Code audit and synthetic regression testing cover cash/FX, nominal-IDR investments, sinking funds, physical assets, shares/ETF and gold. This is **not** certification that the production account balances match bank/broker statements. The active objective is the whole Client Portal system audit, not reconciling one personal account. It requires no personal login email. Independent account-statement reconciliation is a separate optional check; no production account data was read. No production transactions were modified.
 
 ## Findings and corrections
 
@@ -25,7 +25,7 @@ Security/session enforcement is not certified by this functional PR; detailed se
 
 ## Validation
 
-- 42 tests across accounting, live-backend-source fixtures, FX, transfers, save/retry/reload, tenant cache, malformed source records and integrity checks.
+- 44 tests across accounting, live-backend-source fixtures, FX, transfers, save/retry/reload, tenant cache, malformed source records and integrity checks.
 - Six asset categories with 80 portfolio-history variants, preserving asset-minus-cost, category totals and realized-plus-floating invariants.
 - Read-only audit CLI exercised on six synthetic pockets / 36 synthetic transactions: all reconciliation checks passed and the source file hash stayed unchanged.
 - Browser QA with the actual pocket-management form: pending save locks controls, rejection preserves entered name, same ID is retained on retry, confirmed rename preserves SAHAM_ETF type.
@@ -39,3 +39,9 @@ Read the explicitly identified account's ledger snapshot only. Save it outside G
 ## Rollout
 
 This branch is prepared for review; it has not been merged or deployed. Backend source is prepared privately with existing authentication/payment handlers preserved. Deploy frontend and backend together only after explicit owner approval. No production data cleanup, backfill, migration, deletions or reconciliation writes are authorized by the audit itself.
+
+## Clear pocket-level potential P/L
+
+Label acquisition cost as Modal Investasi and the position difference as Potensi Untung/Rugi. A stale snapshot does not replace a number with a command: display the potential difference from the same investment value already shown, marked Estimasi dari nilai terakhir. This is not a forecast or realized profit. Missing manual market values remain distinct from a measured zero.
+
+Treasury Bills screenshot regression: Rp30,770,654 position value minus Rp29,958,116 acquisition cost equals Rp812,538, about 2.71%. The actual detail component is rendered in the regression and checked for both the number and simple labels. The broader Client Portal system/security audit remains open; this label correction does not replace it.

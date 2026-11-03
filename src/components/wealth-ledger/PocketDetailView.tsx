@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CurrencyPocketSummary, LedgerTransaction } from '../../types/ledger';
 import { EnrichedTransaction } from '../../utils/calculator';
 import { isRupiahInvestment } from '../../utils/investmentAccounting';
-import { realizationDetails } from '../../utils/wealthPresentation';
+import { realizationDetails, pocketPotentialPnl } from '../../utils/wealthPresentation';
 import { formatIdNumber, parseIdNumber } from '../../utils/numberInput';
 import { AssetAvatar } from './AssetAvatar';
 import {
@@ -58,7 +58,8 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
   onEditTransaction,
   onDeleteTransaction,
 }) => {
-  const isPnlPositive = pocket.unrealizedPnlIdr >= 0;
+  const potential=pocketPotentialPnl(pocket);
+  const isPnlPositive = (potential.amount??0)>=0;
   const isIdr = (pocket.currency || '').toUpperCase() === 'IDR';
   const isInvestment = isRupiahInvestment(pocket);
   const pocketRealizations = realizationDetails(transactions.filter(t=>t.pocketId===pocket.pocketId));
@@ -229,7 +230,7 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 mt-1">
-                  {isInvestment ? 'Pencatatan nominal rupiah · Nilai investasi sesuai pembaruan terakhir' : 'Buku besar mutasi aset · Metode Moving Average Cost · Real-time valuation'}
+                  {isInvestment ? 'Pencatatan nominal rupiah · Nilai investasi sesuai pembaruan terakhir' : 'Saldo, modal, dan hasil investasi'}
                 </p>
               </div>
             </div>
@@ -239,7 +240,7 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
           <div className="py-6 flex flex-col md:flex-row md:items-end justify-between gap-5">
             <div>
               <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                {isInvestment ? 'Nilai Investasi Tercatat' : 'Total Saldo Tersedia'}
+                {isInvestment ? 'Nilai Investasi' : supportsManualValuation ? 'Saldo Tercatat' : 'Saldo Tersedia'}
               </div>
               <div className="text-2xl md:text-3xl font-extrabold text-slate-900 font-sans tabular-nums tracking-tight mt-1">
                 {formatPocketBalance(
@@ -254,7 +255,7 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
                   ≈ {formatIdr(pocket.marketValueIdr)}
                 </span>
                 <span className="text-xs text-slate-400">(Nilai Pasar IDR)</span>
-                {pocket.valuationNeedsRefresh || (isIdr && !supportsManualValuation) ? null : (
+                {potential.percent===null || (isIdr && !supportsManualValuation) ? null : (
                   <span
                     className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-xs font-bold font-sans tabular-nums ${
                       isPnlPositive
@@ -267,7 +268,7 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
                     ) : (
                       <TrendingDown className="w-3.5 h-3.5" />
                     )}
-                    <span>{formatPercent(pocket.unrealizedPnlPercent)}</span>
+                    <span>{formatPercent(potential.percent!)}{potential.estimated ? ' *' : ''}</span>
                   </span>
                 )}
               </div>
@@ -311,9 +312,8 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
             </div>
           </div>
 
-          {pocket.valuationNeedsRefresh && <p className="mb-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-900">Valuasi belum dapat disesuaikan dengan riwayat mutasi. Perbarui total nilai investasi sesuai aplikasi; untung/rugi sementara tidak ditampilkan.</p>}
-          {!!pocket.valuationTopUpsNative && <p className="mb-3 text-xs text-slate-600">Valuasi acuan + top up setelahnya: {pocket.valuationTopUpsNative.toLocaleString('id-ID',{maximumFractionDigits:2})} {pocket.currency}. Nilai kini estimasi; perubahan harga setelah valuasi belum termasuk.</p>}
-          {pocket.currency!=='IDR' && pocket.instrumentType!=='CASH_VALAS' && pocket.fxRateToIdr && <p className="mb-3 text-xs text-slate-600">Kurs FX: Rp {formatRate(pocket.fxRateToIdr,pocket.currency)} · Ekuivalen saldo tercatat: {formatIdr(pocket.balanceNative*pocket.fxRateToIdr)}. Harga investasi dapat berbeda.</p>}
+          {!!pocket.valuationTopUpsNative && <p className="mb-3 text-xs text-slate-600">Termasuk top up: {pocket.valuationTopUpsNative.toLocaleString('id-ID',{maximumFractionDigits:2})} {pocket.currency}. Harga investasi mengikuti pembaruan terakhir.</p>}
+          {pocket.currency!=='IDR' && pocket.instrumentType!=='CASH_VALAS' && pocket.fxRateToIdr && <p className="mb-3 text-xs text-slate-600">Kurs FX: Rp {formatRate(pocket.fxRateToIdr,pocket.currency)}</p>}
           {/* 4 Mini Statistics Cards in Grid */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 pt-5 border-t border-slate-200/80">
             {/* 1. Kurs Rata-Rata */}
@@ -326,7 +326,7 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
                 {isInvestment ? pocketRealizations.rows.length ? formatIdr(pocketRealizations.total) : 'Belum tersedia' : isIdr && !supportsManualValuation ? '1.0' : `Rp ${formatRate(pocket.averageBuyRate, pocket.currency)}`}
               </div>
               <div className="text-[10px] text-slate-400 mt-0.5">
-                {isInvestment ? 'Laba/rugi dari pencairan tercatat' : 'Weighted average cost'}
+                {isInvestment ? 'Laba/rugi dari pencairan tercatat' : 'Rata-rata kurs saat membeli.'}
               </div>
             </div>
 
@@ -335,7 +335,7 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
               <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
                 <span className="flex items-center gap-1">
                   <Scale className="w-3.5 h-3.5 text-slate-500" />
-                  <span>{supportsManualValuation ? 'Nilai Pasar Portofolio' : 'Kurs Spot Terkini'}</span>
+                  <span>{supportsManualValuation ? 'Nilai Investasi' : 'Kurs Saat Ini'}</span>
                 </span>
                 {supportsManualValuation && (
                   <button
@@ -354,7 +354,7 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
                   : `Rp ${formatRate(pocket.currentMarketRate, pocket.currency)}`}
               </div>
               <div className="text-[10px] text-slate-400 mt-0.5">
-                {supportsManualValuation ? 'Total valuasi manual terkini' : 'Benchmark pasar live'}
+                {supportsManualValuation ? 'Nilai terakhir yang tercatat.' : 'Acuan kurs saat ini.'}
               </div>
             </div>
 
@@ -362,13 +362,13 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
             <div className="bg-white/80 backdrop-blur-xs p-3.5 rounded-xl border border-slate-200/80">
               <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
                 <DollarSign className="w-3.5 h-3.5 text-slate-500" />
-                <span>Modal Tersisa</span>
+                <span>Modal Investasi</span>
               </div>
               <div className="text-lg sm:text-xl font-black text-slate-900 font-sans tabular-nums mt-1">
                 {formatIdr(pocket.totalCostBasisIdr)}
               </div>
               <div className="text-[10px] text-slate-400 mt-0.5">
-                Modal perolehan aset yang masih dimiliki
+                Harga beli investasi yang dimiliki.
               </div>
             </div>
 
@@ -380,21 +380,21 @@ export const PocketDetailView: React.FC<PocketDetailViewProps> = ({
                 ) : (
                   <TrendingDown className="w-3.5 h-3.5 text-rose-600" />
                 )}
-                <span>Laba/Rugi Belum Dicairkan</span>
+                <span>Potensi Untung/Rugi</span>
               </div>
               <div
                 className={`text-lg sm:text-xl font-black font-sans tabular-nums mt-1 ${
                   isPnlPositive ? 'text-emerald-700' : 'text-rose-700'
                 }`}
               >
-                {pocket.valuationNeedsRefresh ? 'Perbarui valuasi' : formatIdr(pocket.unrealizedPnlIdr)}
+                {potential.amount===null?'—':formatIdr(potential.amount)}
               </div>
               <div
                 className={`text-[10px] font-semibold font-sans tabular-nums mt-0.5 ${
                   isPnlPositive ? 'text-emerald-700' : 'text-rose-700'
                 }`}
               >
-                {pocket.valuationNeedsRefresh ? 'Nilai acuan belum cukup untuk menghitung hasil' : `Selisih / modal: ${formatPercent(pocket.unrealizedPnlPercent)}`}
+                {potential.percent!==null ? `${formatPercent(potential.percent)} · ` : ''}{potential.note}
               </div>
             </div>
           </div>

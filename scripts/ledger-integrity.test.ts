@@ -4,7 +4,10 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import {auditLedger,cacheBelongsToTenant,nativeMutationError,normalizeLedgerTransaction,validLedgerDate} from '../src/utils/ledgerIntegrity';
 import {computeCurrencyPocketSummary,computeGlobalWealthSummary,filterValidTransactions} from '../src/utils/calculator';
-import {reportValuationKnown} from '../src/utils/wealthPresentation';
+import {reportValuationKnown,pocketPotentialPnl} from '../src/utils/wealthPresentation';
+import React from 'react';
+import {renderToStaticMarkup} from 'react-dom/server';
+import {PocketDetailView} from '../src/components/wealth-ledger/PocketDetailView';
 import type {AssetPocket,LedgerTransaction,InstrumentType} from '../src/types/ledger';
 
 const pocket=(id='cash',currencyCode='IDR',instrumentType:InstrumentType='CASH_VALAS'):AssetPocket=>({id,name:id,currencyCode,instrumentType,symbol:currencyCode,flag:'',accentColor:'teal',defaultCustodian:'TEST'});
@@ -120,4 +123,27 @@ test('all asset categories preserve aggregate and class-independent asset-minus-
     near(result.reduce((sum,p)=>sum+p.unrealizedPnlIdr,0),total.totalUnrealizedPnlIdr);
     assert.ok(result.every(p=>p.totalCostBasisIdr>=0&&Number.isFinite(p.marketValueIdr)));
   }
+});
+
+test('Treasury Bills shows potential gain from the displayed value even when its snapshot needs refresh',()=>{
+  const p=pocket('bills','USD','REKSADANA');
+  const base=computeCurrencyPocketSummary('USD',[],18145,p);
+  const position={...base,name:'US Treasury Bills',balanceNative:1683.58,marketValueIdr:30_770_654,totalCostBasisIdr:29_958_116,
+    manualMarketValue:30_770_654,lastPriceUpdatedAt:'2026-10-01T07:30:00Z',valuationNeedsRefresh:true};
+  const potential=pocketPotentialPnl(position);
+  near(potential.amount!,812_538);near(potential.percent!,812_538/29_958_116*100);
+  assert.equal(potential.estimated,true);
+  const html=renderToStaticMarkup(React.createElement(PocketDetailView,{pocket:position,transactions:[],onBack:()=>{},onTopUp:()=>{},onWithdraw:()=>{},
+    onUpdateMarketRate:async()=>true,onOpenPocketManager:()=>{},onEditTransaction:()=>{},onDeleteTransaction:()=>{}}));
+  assert.match(html,/Potensi Untung\/Rugi/);assert.match(html,/Modal Investasi/);assert.match(html,/Rp 812.538/);assert.match(html,/2.71%/);
+  assert.match(html,/Estimasi dari nilai terakhir/);assert.doesNotMatch(html,/Perbarui valuasi|Modal Tersisa|untung\/rugi sementara tidak ditampilkan/);
+});
+
+test('potential P/L keeps unknown market values distinct from zero, and supports losses and zero cost',()=>{
+  const p=pocket('fund','IDR','REKSADANA');
+  const unknown=computeCurrencyPocketSummary('IDR',[tx('a','2026-10-01','CREDIT',100,p)],1,p);
+  assert.equal(pocketPotentialPnl(unknown).amount,null);
+  const loss={...unknown,manualMarketValue:50,marketValueIdr:50,lastPriceUpdatedAt:'2026-10-02T00:00:00Z'};
+  near(pocketPotentialPnl(loss).amount!,-50);near(pocketPotentialPnl(loss).percent!,-50);
+  assert.equal(pocketPotentialPnl({...loss,totalCostBasisIdr:0}).percent,null);
 });

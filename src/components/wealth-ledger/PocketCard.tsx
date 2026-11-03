@@ -1,3 +1,4 @@
+import {pocketPotentialPnl} from '../../utils/wealthPresentation';
 import React from 'react';
 import { CurrencyPocketSummary } from '../../types/ledger';
 import { isRupiahInvestment } from '../../utils/investmentAccounting';
@@ -94,7 +95,8 @@ export const PocketCard: React.FC<PocketCardProps> = ({
   onTouchEnd,
   onTouchCancel,
 }) => {
-  const pnlPercent = pocket.unrealizedPnlPercent;
+  const potential=pocketPotentialPnl(pocket);
+  const pnlPercent=potential.percent??0;
   const displayName = pocket.name || pocket.currencyName;
   const custodianDisplay =
     pocket.defaultCustodian ||
@@ -182,7 +184,7 @@ export const PocketCard: React.FC<PocketCardProps> = ({
           </div>
 
           {/* Return Pill */}
-          {!pocket.valuationNeedsRefresh && (pocket.currency !== 'IDR' || supportsManualValuation) &&
+          {potential.percent!==null && (pocket.currency !== 'IDR' || supportsManualValuation) &&
           ((pocket.totalCostBasisIdr || 0) > 0 || (pocket.balanceNative || 0) > 0) &&
           Math.abs(pnlPercent) >= 0.01 ? (
             <span
@@ -192,7 +194,7 @@ export const PocketCard: React.FC<PocketCardProps> = ({
                   : 'bg-rose-50 text-rose-600 border border-rose-100'
               }`}
             >
-              {pnlPercent > 0 ? '+' : ''}{pnlPercent.toFixed(2)}%
+              {pnlPercent > 0 ? '+' : ''}{pnlPercent.toFixed(2)}%{potential.estimated?' *':''}
             </span>
           ) : (
             <div className="w-4 h-4 rounded-full flex items-center justify-center text-slate-300 group-hover:text-emerald-600 transition-colors">

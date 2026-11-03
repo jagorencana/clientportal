@@ -102,7 +102,7 @@ test('mixed valuation coverage reconciles the user portfolio headline, classes a
   near(summary.totalUnrealizedPnlPercent,2_398_393/630_183_233*100);
   const html=renderToStaticMarkup(React.createElement(GlobalMetrics,{summary,pocketsCount:3,pockets:accounts}));
   assert.match(html,/Rp 2.398.393/);
-  assert.match(html,/Laba\/Rugi Belum Dicairkan/);assert.match(html,/perlu diperbarui nilainya/);
+  assert.match(html,/Potensi Untung\/Rugi/);assert.match(html,/perlu diperbarui nilainya/);
   assert.doesNotMatch(html,/belum masuk perhitungan untung|Floating P\/L · sebagian aset/);
   const latestAccounts=[trust,{...other,marketValueIdr:100_635_527,unrealizedPnlIdr:-4_459_834},estimated];
   const latest=computeGlobalWealthSummary(latestAccounts);

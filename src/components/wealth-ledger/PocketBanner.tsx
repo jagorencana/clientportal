@@ -1,3 +1,4 @@
+import {pocketPotentialPnl} from '../../utils/wealthPresentation';
 import React from 'react';
 import { CurrencyPocketSummary } from '../../types/ledger';
 import { AssetAvatar } from './AssetAvatar';
@@ -26,7 +27,8 @@ export const PocketBanner: React.FC<PocketBannerProps> = ({
   pocket,
   onOpenRatesModal,
 }) => {
-  const isPnlPositive = pocket.unrealizedPnlIdr >= 0;
+  const potential=pocketPotentialPnl(pocket);
+  const isPnlPositive=(potential.amount??0)>=0;
 
   return (
     <section aria-label={`Rekapitulasi Kantong ${pocket.currency}`} className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 transition-all">
@@ -149,7 +151,7 @@ export const PocketBanner: React.FC<PocketBannerProps> = ({
               isPnlPositive ? 'text-emerald-800' : 'text-rose-800'
             }`}
           >
-            <span>Laba/Rugi Belum Dicairkan</span>
+            <span>Potensi Untung/Rugi</span>
             {isPnlPositive ? (
               <TrendingUp className="w-3.5 h-3.5" />
             ) : (
@@ -161,7 +163,7 @@ export const PocketBanner: React.FC<PocketBannerProps> = ({
               isPnlPositive ? 'text-emerald-700' : 'text-rose-700'
             }`}
           >
-            {pocket.valuationNeedsRefresh ? 'Perbarui valuasi' : formatIdr(pocket.unrealizedPnlIdr)}
+            {potential.amount===null?'—':formatIdr(potential.amount)}
           </div>
           <div
             className={`mt-1 text-[11px] font-semibold border-t pt-1.5 flex items-center justify-between ${
@@ -172,7 +174,7 @@ export const PocketBanner: React.FC<PocketBannerProps> = ({
           >
             <span>Perubahan (%)</span>
             <span className="font-sans tabular-nums font-bold">
-              {pocket.valuationNeedsRefresh ? '—' : formatPercent(pocket.unrealizedPnlPercent)}
+              {potential.percent===null?'—':formatPercent(potential.percent)}{potential.estimated?' *':''}
             </span>
           </div>
         </div>
