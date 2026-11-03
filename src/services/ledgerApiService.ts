@@ -528,8 +528,8 @@ export const saveRemoteTransaction = async (
     });
     return await parseJsonResponse(res);
   } catch (err: any) {
-    console.warn('Gagal menyimpan transaksi ke Sheets (tersimpan lokal):', err?.message || err);
-    return null;
+    console.warn('Penyimpanan transaksi belum dikonfirmasi:', err?.message || err);
+    return {success:false,uncertain:true,message:'Penyimpanan belum dikonfirmasi. Periksa koneksi lalu coba lagi dengan isian yang sama.'};
   }
 };
 

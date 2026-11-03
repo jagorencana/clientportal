@@ -381,7 +381,8 @@ function investmentServerPosition(pocket, transactions) {
   const cashflow = cashflowOf(rows);
   const rawValue = pocket.marketValueNative !== undefined && pocket.marketValueNative !== ''
     ? pocket.marketValueNative : pocket.marketValue;
-  const hasValuation = rawValue !== undefined && rawValue !== null && rawValue !== '' && isFinite(Number(rawValue)) && Number(rawValue) >= 0;
+  const hasValuation = rawValue !== undefined && rawValue !== null && rawValue !== '' && isFinite(Number(rawValue)) && Number(rawValue) >= 0 &&
+    (Number(rawValue) > 0 || !!pocket.lastPriceUpdatedAt);
   const date = pocket.lastPriceUpdatedAt ? Utilities.formatDate(new Date(pocket.lastPriceUpdatedAt), 'Asia/Jakarta', 'yyyy-MM-dd') : '';
   const anchored = pocket.valuationCashflowIdr !== undefined && pocket.valuationCashflowIdr !== '' && isFinite(Number(pocket.valuationCashflowIdr));
   const ambiguous = hasValuation && !anchored && (!date || rows.some(function(t) { return String(t.date) === date; }));
