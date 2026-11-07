@@ -43,7 +43,7 @@ import {
 } from '../../services/ledgerApiService';
 import { exportLedgerTransactionsToCsv } from '../../services/reportService';
 import { investmentDeletionError, investmentMutationError, isRupiahInvestment, netCashflow, pocketTransactions, redemptionPreview, sameFinancialValues } from '../../utils/investmentAccounting';
-import {auditLedger,nativeMutationError,type LedgerIssue} from '../../utils/ledgerIntegrity';
+import {auditLedger,blocksLedgerSnapshot,nativeMutationError,type LedgerIssue} from '../../utils/ledgerIntegrity';
 import { GlobalMetrics } from './GlobalMetrics';
 import {TransferModal} from './TransferModal';
 import {prepareTransfer,transferDependencyError,TransferInput} from '../../utils/ledgerTransfers';
@@ -207,6 +207,7 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
   const [isLedgerLoading, setIsLedgerLoading] = useState(!initialLedgerCache);
   const [ledgerLoadError, setLedgerLoadError] = useState<string | null>(null);
   const [ledgerDataIssues,setLedgerDataIssues]=useState<LedgerIssue[]>(initialLedgerCache?.integrityIssues||[]);
+  const [hasLedgerSnapshot, setHasLedgerSnapshot] = useState(Boolean(initialLedgerCache));
   const auditSourceRef=useRef<any>(initialLedgerCache);
   const [isUsingLedgerCache, setIsUsingLedgerCache] = useState(Boolean(initialLedgerCache));
   const [lastSheetsSyncTime, setLastSheetsSyncTime] = useState<string | null>(() => {
@@ -311,13 +312,22 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
         throw new Error('Google Sheets belum dapat dijangkau dan cache lokal belum tersedia.');
       }
 
+      const issues = data.integrityIssues || auditLedger(data.pockets || [], data.transactions || []).issues;
+      auditSourceRef.current = data;
+      setLedgerDataIssues(issues);
+      if (blocksLedgerSnapshot(issues)) {
+        setInvestmentAccountingReady(false);
+        setTransferReady(false);
+        setIsReportMenuOpen(false);
+        throw new Error('Data kantong dan mutasi tidak cocok. Ringkasan tidak diperbarui.');
+      }
+
+      setHasLedgerSnapshot(true);
       const usingCache = data.source === 'cache';
       setInvestmentAccountingReady(!usingCache && data.investmentAccountingVersion === 1);
       setTransferReady(!usingCache && data.ledgerTransferVersion === 1);
       setIsUsingLedgerCache(usingCache);
 
-      auditSourceRef.current=data;
-      setLedgerDataIssues(data.integrityIssues||auditLedger(data.pockets||[],data.transactions||[]).issues);
       const remotePockets = Array.isArray(data.pockets) ? data.pockets : [];
       const activePocketIds = new Set(
         remotePockets.map((pocket) => String(pocket.id || '').trim()).filter(Boolean)
@@ -388,12 +398,14 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
   // Stale-while-revalidate: tampilkan cache tenant seketika, lalu fetch Sheets diam-diam.
   useEffect(() => {
     if (!effectiveEmail) {
+      setHasLedgerSnapshot(false);
       setIsLedgerLoading(false);
       setLedgerLoadError('Email tenant aktif belum tersedia.');
       return;
     }
 
     const cached = loadCachedLedgerData(effectiveEmail);
+    setHasLedgerSnapshot(Boolean(cached));
     setInvestmentAccountingReady(false);
     setTransferReady(false);
     setIsTransferOpen(false);
@@ -1026,7 +1038,7 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
                   }`}
                 />
                 {ledgerLoadError
-                  ? 'Koneksi bermasalah'
+                  ? 'Sinkronisasi gagal'
                   : isUsingLedgerCache
                     ? `Mode cache · ${lastSheetsSyncTime || 'tersimpan'}`
                   : lastSheetsSyncTime
@@ -1050,6 +1062,7 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
               <button
                 type="button"
                 onClick={() => setIsReportMenuOpen((open) => !open)}
+                disabled={!hasLedgerSnapshot || Boolean(ledgerLoadError)}
                 aria-expanded={isReportMenuOpen}
                 aria-haspopup="menu"
                 className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 shadow-2xs transition hover:bg-slate-50"
@@ -1059,7 +1072,7 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
                 <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
               </button>
 
-              {isReportMenuOpen && (
+              {isReportMenuOpen && hasLedgerSnapshot && !ledgerLoadError && (
                 <div
                   role="menu"
                   className="absolute right-0 top-full z-20 mt-2 w-64 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl"
@@ -1121,7 +1134,7 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
 
         {!isLedgerLoading && ledgerLoadError && (
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
-            <span>Data Google Sheets belum dapat dimuat: {ledgerLoadError}</span>
+            <span>{ledgerLoadError} {hasLedgerSnapshot ? "Menampilkan data terakhir yang lolos pemeriksaan." : "Ringkasan akan muncul setelah data lolos pemeriksaan."}</span>
             <button
               type="button"
               onClick={handleSyncWithSheets}
@@ -1154,9 +1167,9 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
           </div>
         )}
 
-        <div className={isLedgerLoading ? 'hidden' : 'contents'}>
+        {ledgerDataIssues.length>0 && <section className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900"><p>{ledgerDataIssues.length} temuan pemeriksaan data.</p><ul className="mt-2 list-disc pl-4">{[...new Set(ledgerDataIssues.map(i=>i.message))].slice(0,5).map(message=><li key={message}>{message}</li>)}</ul><button type="button" className="mt-2 font-semibold underline" onClick={()=>{const blob=new Blob([JSON.stringify({issues:ledgerDataIssues,pockets:auditSourceRef.current?.pockets,transactions:auditSourceRef.current?.sourceTransactions||auditSourceRef.current?.transactions},null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download='pemeriksaan-wealth-ledger.json';link.click();URL.revokeObjectURL(url);}}>Unduh catatan pemeriksaan</button></section>}
 
-        {ledgerDataIssues.length>0 && <section className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900"><p>{ledgerDataIssues.length} catatan perlu diperiksa. Ringkasan sementara belum dapat dipastikan.</p><ul className="mt-2 list-disc pl-4">{[...new Set(ledgerDataIssues.map(i=>i.message))].slice(0,5).map(message=><li key={message}>{message}</li>)}</ul><button type="button" className="mt-2 font-semibold underline" onClick={()=>{const blob=new Blob([JSON.stringify({issues:ledgerDataIssues,pockets:auditSourceRef.current?.pockets,transactions:auditSourceRef.current?.sourceTransactions||auditSourceRef.current?.transactions},null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download='pemeriksaan-wealth-ledger.json';link.click();URL.revokeObjectURL(url);}}>Unduh catatan pemeriksaan</button></section>}
+        <div className={isLedgerLoading || !hasLedgerSnapshot ? 'hidden' : 'contents'}>
         {/* A. Ringkasan utama dan alokasi kelas aset */}
         <GlobalMetrics
           summary={globalSummary}
@@ -1325,7 +1338,7 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
 
       {/* E. Monthly Asset Portfolio Report Modal (A4 Print Ready) */}
       <MonthlyReportModal
-        isOpen={isReportModalOpen}
+        isOpen={isReportModalOpen && hasLedgerSnapshot && !ledgerLoadError}
         onClose={() => setIsReportModalOpen(false)}
         pockets={currencyPockets}
         transactions={transactions}
@@ -1335,7 +1348,7 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
 
       {/* Statement Download Modal (Rekening Koran) */}
       <StatementDownloadModal
-        isOpen={isStatementModalOpen}
+        isOpen={isStatementModalOpen && hasLedgerSnapshot && !ledgerLoadError}
         onClose={() => setIsStatementModalOpen(false)}
         pockets={pockets}
         transactions={transactions}

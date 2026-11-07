@@ -184,12 +184,9 @@ expect(
   'Strategi cache-first stale-while-revalidate Wealth Ledger hilang'
 );
 expect(
-  ledgerService.includes("rawMarketValue === ''") &&
-    ledgerService.includes('parsedMarketValue >= 0') &&
-    ledgerService.includes('marketValueNative') &&
-    wealthLedgerView.includes('valuationInputRate(pocket,liveFxRates)') &&
+  wealthLedgerView.includes('valuationInputRate(pocket,liveFxRates)') &&
     wealthLedgerView.includes("pocket.instrumentType === 'SINKING_FUND'"),
-  'Nilai pasar kosong masih berisiko dianggap Rp 0 atau Sinking Fund kehilangan dukungan valuasi'
+  'Sinking Fund kehilangan dukungan valuasi'
 );
 expect(
   wealthLedgerView.includes('new Map<string, AssetPocket>()') &&

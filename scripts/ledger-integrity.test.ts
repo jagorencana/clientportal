@@ -2,13 +2,15 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import fs from 'node:fs';
 import vm from 'node:vm';
-import {auditLedger,cacheBelongsToTenant,nativeMutationError,normalizeLedgerTransaction,validLedgerDate} from '../src/utils/ledgerIntegrity';
+import {auditLedger,blocksLedgerSnapshot,cacheBelongsToTenant,nativeMutationError,normalizeLedgerTransaction,validLedgerDate} from '../src/utils/ledgerIntegrity';
 import {computeCurrencyPocketSummary,computeGlobalWealthSummary,filterValidTransactions} from '../src/utils/calculator';
 import {reportValuationKnown,pocketPotentialPnl} from '../src/utils/wealthPresentation';
 import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {PocketDetailView} from '../src/components/wealth-ledger/PocketDetailView';
 import type {AssetPocket,LedgerTransaction,InstrumentType} from '../src/types/ledger';
+
+import {fetchRemoteLedgerData,loadCachedLedgerData,normalizeRemotePocket} from '../src/services/ledgerApiService';
 
 const pocket=(id='cash',currencyCode='IDR',instrumentType:InstrumentType='CASH_VALAS'):AssetPocket=>({id,name:id,currencyCode,instrumentType,symbol:currencyCode,flag:'',accentColor:'teal',defaultCustodian:'TEST'});
 const tx=(id:string,date:string,type:'CREDIT'|'DEBET',amount:number,p=pocket(),rate=1):LedgerTransaction=>({id,date,type,pocketId:p.id,currency:p.currencyCode,nativeAmount:amount,exchangeRate:rate,costIdr:(type==='CREDIT'?1:-1)*amount*rate,description:'Synthetic',posCategory:p.name,location:'TEST'});
@@ -33,6 +35,62 @@ test('bad source values do not become invented IDs, today dates, debit types or 
   assert.equal(filterValidTransactions([row]).length,0);
   assert.equal(validLedgerDate('2026-02-30'),false);assert.equal(validLedgerDate('2026-02-28'),true);
   const issues=auditLedger([pocket()], [row]);assert.ok(issues.blocking>=3);
+});
+
+test('dated legacy crypto valuation keeps the recorded IDR value and accepts a deliberate zero', () => {
+  const raw = {
+    ...pocket('crypto', 'IDR', 'REKSADANA'),
+    marketValue: 20_000_000,
+    marketValueNative: 0,
+    lastPriceUpdatedAt: '2026-09-30T08:30:00Z',
+  };
+  const holding = normalizeRemotePocket(raw);
+  const rows = [tx('opening', '2026-05-22', 'CREDIT', 22_870_314, holding)];
+  const summary = computeCurrencyPocketSummary('IDR', rows, 1, holding);
+  assert.equal(summary.marketValueIdr, 20_000_000);
+  assert.equal(pocketPotentialPnl(summary).amount, -2_870_314);
+  const empty = normalizeRemotePocket({ ...raw, marketValue: 0 });
+  assert.equal(computeCurrencyPocketSummary('IDR', rows, 1, empty).marketValueIdr, 22_870_314);
+  const explicit = normalizeRemotePocket({ ...raw, marketValue: 0, marketValueCurrency: 'IDR' });
+  assert.equal(computeCurrencyPocketSummary('IDR', rows, 1, explicit).marketValueIdr, 0);
+});
+
+test('ledger refresh retries invalid data and preserves the last verified cache', async (t) => {
+  const email = 'test@example.test';
+  const usd = pocket('usd', 'USD');
+  const source = { pockets: [usd], transactions: [
+    { id: 'legacy', pocketId: 'usd', date: '2026-11-01', type: 'CREDIT', amount: 100, rate: 17_000, totalIdr: 1_700_001 },
+  ] };
+  const bad = { ...source, transactions: [
+    ...source.transactions,
+    { ...source.transactions[0], id: 'orphan', pocketId: 'missing' },
+  ] };
+  let responses = [source, bad, bad, bad, bad, source];
+  const storage = new Map<string, string>();
+  const browser = {
+    localStorage: { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value) },
+    setTimeout: (callback: () => void, delay: number) => setTimeout(callback, delay === 45_000 ? delay : 0),
+    clearTimeout,
+  };
+  Object.defineProperty(globalThis, 'window', { value: browser, configurable: true });
+  t.after(() => Reflect.deleteProperty(globalThis, 'window'));
+  t.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify(responses.shift())));
+  t.mock.method(console, 'warn', () => {});
+
+  const initial = await fetchRemoteLedgerData(email);
+  assert.equal(initial?.transactions?.[0].currency, 'USD');
+  assert.equal(initial?.transactions?.[0].costIdr, 1_700_001);
+  assert.deepEqual(initial?.integrityIssues, []);
+  const cachedBefore = [...storage];
+  const rejected = await fetchRemoteLedgerData(email);
+  assert.equal(blocksLedgerSnapshot(rejected?.integrityIssues), true);
+  assert.deepEqual([...storage], cachedBefore);
+  assert.equal(loadCachedLedgerData(email)?.transactions?.length, 1);
+
+  const recovered = await fetchRemoteLedgerData(email);
+  assert.deepEqual(recovered?.integrityIssues, []);
+  assert.equal(recovered?.transactions?.length, 1);
+  assert.equal(responses.length, 0);
 });
 
 test('tenant cache rejects mixed owners and unverifiable legacy ownership',()=>{

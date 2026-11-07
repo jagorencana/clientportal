@@ -12,9 +12,9 @@ export function storedNumber(value:unknown):number|undefined {
   return typeof value==='number'||typeof value==='string'?Number(value):NaN;
 }
 
-export function normalizeLedgerTransaction(raw:any):LedgerTransaction {
+export function normalizeLedgerTransaction(raw:any, pocketCurrency?:string):LedgerTransaction {
   const first=(...values:unknown[])=>values.find(v=>v!==undefined&&v!==null&&!(typeof v==='string'&&!v.trim()));
-  const currency=String(raw.currency??raw.currencyCode??'').trim().toUpperCase();
+  const currency=String(first(raw.currency,raw.currencyCode,pocketCurrency)??'').trim().toUpperCase();
   const amount=storedNumber(first(raw.nativeAmount,raw.amount));
   const rate=storedNumber(first(raw.exchangeRate,raw.rate))??(currency==='IDR'?1:NaN);
   const stored=storedNumber(first(raw.totalIdr,raw.costIdr));
@@ -85,6 +85,24 @@ export function auditLedger(pockets:AssetPocket[],transactions:LedgerTransaction
     issues.push({priority:'P1',code:'transfer-pair',transactionId:pair[0]?.id,message:'Dua sisi transfer tidak cocok.'});
   }
   return {pocketCount:pockets.length,transactionCount:transactions.length,issues,blocking:issues.filter(i=>i.priority==='P1').length};
+}
+
+// These issues can drop, duplicate, or misprice a row in the summary.
+const blockingSnapshotIssues = new Set([
+  'pocket-id', 'transaction-id', 'orphan', 'date', 'amount-type',
+  'released-cost', 'total-conflict', 'currency', 'transfer-pair',
+]);
+
+export function blocksLedgerSnapshot(issues: LedgerIssue[]): boolean {
+  return issues.some(issue => blockingSnapshotIssues.has(issue.code));
+}
+
+export function normalizeLedgerRows(pockets: AssetPocket[], rows: unknown[]) {
+  const currencyByPocket = new Map(pockets.map(pocket => [pocket.id, pocket.currencyCode]));
+  return rows.map((raw: any) => {
+    const row = raw ?? {};
+    return normalizeLedgerTransaction(row, currencyByPocket.get(String(row.pocketId ?? '').trim()));
+  });
 }
 
 export function nativeMutationError(pocket:AssetPocket,history:LedgerTransaction[],candidate:LedgerTransaction|null,deletedId?:string):string {
