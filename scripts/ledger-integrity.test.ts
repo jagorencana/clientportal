@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import fs from 'node:fs';
 import vm from 'node:vm';
-import {auditLedger,cacheBelongsToTenant,nativeMutationError,normalizeLedgerTransaction,validLedgerDate} from '../src/utils/ledgerIntegrity';
+import {auditLedger,cacheBelongsToTenant,nativeMutationError,normalizeLedgerTransaction,normalizeLedgerRows,validLedgerDate} from '../src/utils/ledgerIntegrity';
 import {computeCurrencyPocketSummary,computeGlobalWealthSummary,filterValidTransactions} from '../src/utils/calculator';
 import {reportValuationKnown,pocketPotentialPnl} from '../src/utils/wealthPresentation';
 import React from 'react';
@@ -51,6 +51,23 @@ test('a legacy IDR valuation survives a contradictory native zero in the browser
   assert.equal(summary.unrealizedPnlIdr, -2_870_314);
   const explicitZero = computeCurrencyPocketSummary('IDR', rows, 1, { ...holding, marketValue: 0 });
   assert.equal(explicitZero.marketValueIdr, 0);
+});
+
+test('legacy rows inherit currency from their own pocket without hiding mismatches or orphans', () => {
+  const usd = pocket('usd', 'USD');
+  const raw = { id: 'a', pocketId: 'usd', date: '2026-11-01', type: 'IN', amount: 100, rate: 17_000, totalIdr: 1_700_001 };
+  const [legacy, alias, mismatch, orphan] = normalizeLedgerRows([usd], [
+    raw,
+    { ...raw, id: 'b', currency: ' ', currencyCode: 'usd' },
+    { ...raw, id: 'c', currency: 'EUR' },
+    { ...raw, id: 'd', pocketId: 'missing' },
+  ]);
+  assert.equal(legacy.currency, 'USD');
+  assert.equal(legacy.costIdr, 1_700_001);
+  assert.equal(alias.currency, 'USD');
+  assert.equal(mismatch.currency, 'EUR');
+  assert.equal(orphan.currency, '');
+  assert.deepEqual(auditLedger([usd], [legacy, alias, mismatch, orphan]).issues.map(i => i.code), ['currency', 'orphan']);
 });
 
 test('tenant cache rejects mixed owners and unverifiable legacy ownership',()=>{
