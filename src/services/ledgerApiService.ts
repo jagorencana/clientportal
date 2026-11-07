@@ -4,7 +4,7 @@
  */
 
 import { AssetPocket, InstrumentType, LedgerTransaction } from '../types/ledger';
-import {auditLedger,cacheBelongsToTenant,normalizeLedgerTransaction} from '../utils/ledgerIntegrity';
+import {auditLedger,blocksLedgerSnapshot,cacheBelongsToTenant,normalizeLedgerRows} from '../utils/ledgerIntegrity';
 import type {TransferInput} from '../utils/ledgerTransfers';
 
 export async function saveRemoteTransfer(transfer:TransferInput,email:string) {
@@ -20,7 +20,7 @@ export async function cancelRemoteTransfer(transferId:string,email:string) {
 
 const FALLBACK_GAS_URL =
   'https://script.google.com/macros/s/AKfycbwnCkUHXODtKuStZvUnbdohnZyLLD9p53o6VNmMrnpWbaNaSd1PHfP3dInyOjybTdmF/exec';
-const GAS_URL = String(import.meta.env.VITE_LEDGER_GAS_URL || FALLBACK_GAS_URL).trim();
+const GAS_URL = String(import.meta.env?.VITE_LEDGER_GAS_URL || FALLBACK_GAS_URL).trim();
 const GAS_REQUEST_TIMEOUT_MS = 45_000;
 const DELETE_POCKET_TIMEOUT_MS = 10_000;
 const GAS_FETCH_MAX_ATTEMPTS = 3;
@@ -67,7 +67,7 @@ const tenantCacheKey = (email: string, prefix = LEDGER_CACHE_PREFIX): string => 
 export const saveCachedLedgerData = (emailInput: string, data: RemoteLedgerPayload): void => {
   const email = resolveUserEmail(emailInput);
   if (!email) return;
-  if (typeof window === 'undefined') return;
+  if (typeof window === 'undefined' || blocksLedgerSnapshot(data.integrityIssues ?? [])) return;
   try {
     window.localStorage.setItem(
       tenantCacheKey(email),
@@ -98,13 +98,25 @@ export const loadCachedLedgerData = (userEmail: string): RemoteLedgerPayload | n
       console.warn('Cache Wealth Ledger ditolak: kepemilikan akun tidak dapat dipastikan.');
       return null;
     }
+    const sourcePockets = cached.sourcePockets ?? cached.pockets;
+    const sourceTransactions = cached.sourceTransactions ?? cached.transactions;
+    if (!cacheBelongsToTenant({ ...cached, pockets: sourcePockets, transactions: sourceTransactions }, email)) return null;
+
+    const pockets = sourcePockets.map(normalizeRemotePocket);
+    const transactions = normalizeLedgerRows(pockets, sourceTransactions);
+    const issues = auditLedger(pockets, transactions).issues;
+    const missingPocketId = sourcePockets.some(pocket => !String(pocket.id ?? pocket.pocketId ?? '').trim());
+    if (missingPocketId || blocksLedgerSnapshot(issues) ||
+        (!cached.sourceTransactions && blocksLedgerSnapshot(cached.integrityIssues ?? []))) return null;
+
+    const verified = { ...cached, pockets, transactions, integrityIssues: issues };
     if (!window.localStorage.getItem(currentKey)) {
       window.localStorage.setItem(
         currentKey,
-        JSON.stringify({ ...cached, cacheTenantEmail: email, source: 'cache' })
+        JSON.stringify({ ...verified, cacheTenantEmail: email, source: 'cache' })
       );
     }
-    return { ...cached, source: 'cache' };
+    return { ...verified, source: 'cache' };
   } catch (error) {
     console.warn('Cache lokal Wealth Ledger tidak dapat dibaca:', error);
     return null;
@@ -157,24 +169,19 @@ export const normalizeRemotePocket = (p: any, idx: number = 0): AssetPocket => {
   const manualMarketRate = Number.isFinite(parsedManualRate) && parsedManualRate > 0
     ? parsedManualRate
     : undefined;
-  const rawMarketValue = p.marketValue ?? p.marketValueIdr;
-  const parsedMarketValue = rawMarketValue === '' || rawMarketValue === null || rawMarketValue === undefined
-    ? Number.NaN
-    : Number(rawMarketValue);
-  // Nol/kosong dari sel Sheets bukan valuasi manual. Nilai manual baru aktif setelah input positif.
-  const marketValue = Number.isFinite(parsedMarketValue) && parsedMarketValue >= 0 && (parsedMarketValue>0 || !!p.lastPriceUpdatedAt)
-    ? parsedMarketValue
-    : undefined;
-  const rawNativeMarketValue = p.marketValueNative;
-  const parsedNativeMarketValue = rawNativeMarketValue === '' || rawNativeMarketValue === null || rawNativeMarketValue === undefined
-    ? Number.NaN
-    : Number(rawNativeMarketValue);
-  const marketValueNative = Number.isFinite(parsedNativeMarketValue) && parsedNativeMarketValue >= 0 && (parsedNativeMarketValue>0 || !!p.lastPriceUpdatedAt)
-    ? parsedNativeMarketValue
-    : undefined;
-  const marketValueCurrency = marketValueNative !== undefined
-    ? String(p.marketValueCurrency || currency).trim().toUpperCase()
-    : undefined;
+  const explicitValueCurrency = String(p.marketValueCurrency ?? '').trim().toUpperCase();
+  const hasValuationDate = Number.isFinite(Date.parse(p.lastPriceUpdatedAt || p.priceUpdatedAt || ''));
+  // Older Apps Script responses converted blank cells to zero. The valuation
+  // form saves a currency marker when the user enters a native value.
+  const acceptsZero = hasValuationDate && explicitValueCurrency === currency;
+  const readMarketValue = (raw: unknown) => {
+    if ((typeof raw !== 'number' && typeof raw !== 'string') || !String(raw).trim()) return undefined;
+    const value = Number(raw);
+    return Number.isFinite(value) && (value > 0 || (value === 0 && acceptsZero)) ? value : undefined;
+  };
+  const marketValue = readMarketValue(p.marketValue ?? p.marketValueIdr);
+  const marketValueNative = readMarketValue(p.marketValueNative);
+  const marketValueCurrency = marketValueNative === undefined ? undefined : explicitValueCurrency || currency;
 
   if (instrumentType === 'LOGAM_MULIA') {
     instrumentType = 'LOGAM_MULIA';
@@ -311,6 +318,7 @@ export const fetchRemoteLedgerData = async (
   }
 
   let lastError: unknown = null;
+  let rejectedSnapshot: RemoteLedgerPayload | null = null;
   for (let attempt = 1; attempt <= GAS_FETCH_MAX_ATTEMPTS; attempt += 1) {
     try {
       const res = await executeApiRequest(
@@ -323,11 +331,14 @@ export const fetchRemoteLedgerData = async (
         (Array.isArray(rawResponse.data.pockets) || Array.isArray(rawResponse.data.transactions))
           ? rawResponse.data
           : rawResponse;
-      if (!data || data.status === 'error' || data.success === false) {
+      if (!data || rawResponse.status === 'error' || rawResponse.success === false || data.status === 'error' || data.success === false) {
         throw new Error(data?.message || 'Ledger API mengembalikan respons gagal.');
       }
 
-      data.sourcePockets=Array.isArray(data.pockets)?data.pockets:[];
+      if (!Array.isArray(data.pockets) || !Array.isArray(data.transactions)) {
+        throw new Error('Respons kantong dan mutasi dari Google Sheets tidak lengkap.');
+      }
+      data.sourcePockets=data.pockets;
       if(!cacheBelongsToTenant({cacheTenantEmail:emailParam,pockets:data.sourcePockets,transactions:Array.isArray(data.transactions)?data.transactions:[]},emailParam))throw new Error('Data akun tidak cocok. Muat ulang sesi akun Anda.');
       const normalizedPockets = (Array.isArray(data.pockets) ? data.pockets : [])
         .map((p: any, idx: number) => normalizeRemotePocket(p, idx));
@@ -343,12 +354,16 @@ export const fetchRemoteLedgerData = async (
       data.duplicatePocketIds = Array.from(duplicatePocketIds);
 
       data.sourceTransactions=Array.isArray(data.transactions)?data.transactions:[];
-      data.transactions=data.sourceTransactions.map(normalizeLedgerTransaction);
+      data.transactions=normalizeLedgerRows(data.pockets, data.sourceTransactions);
       const integrity=auditLedger(data.pockets,data.transactions);
       data.integrityIssues=integrity.issues;
       if(data.sourcePockets.some((p:any)=>!String(p.id||p.pocketId||'').trim()))data.integrityIssues.push({priority:'P1',code:'pocket-id',message:'ID kantong kosong pada sumber data.'});
       if(duplicatePocketIds.size)data.integrityIssues.push({priority:'P1',code:'pocket-id',message:'ID kantong berulang pada sumber data.'});
       data.source = 'remote';
+      if (blocksLedgerSnapshot(data.integrityIssues)) {
+        rejectedSnapshot = data;
+        throw new Error('Data dari Google Sheets perlu diperiksa.');
+      }
       if (options.persistCache !== false) saveCachedLedgerData(emailParam, data);
       return data;
     } catch (error: any) {
@@ -363,6 +378,7 @@ export const fetchRemoteLedgerData = async (
     }
   }
 
+  if (rejectedSnapshot) return rejectedSnapshot;
   const cached = loadCachedLedgerData(emailParam);
   if (cached) {
     return {
