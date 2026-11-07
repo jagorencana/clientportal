@@ -35,6 +35,24 @@ test('bad source values do not become invented IDs, today dates, debit types or 
   const issues=auditLedger([pocket()], [row]);assert.ok(issues.blocking>=3);
 });
 
+test('a legacy IDR valuation survives a contradictory native zero in the browser cache', () => {
+  const holding = {
+    ...pocket('crypto', 'IDR', 'REKSADANA'),
+    marketValue: 20_000_000,
+    marketValueNative: 0,
+    marketValueCurrency: 'IDR',
+    lastPriceUpdatedAt: '2026-09-30T08:30:00Z',
+  };
+  const rows = [tx('opening', '2026-05-22', 'CREDIT', 22_870_314, holding)];
+  const summary = computeCurrencyPocketSummary('IDR', rows, 1, holding);
+  assert.equal(summary.marketValueIdr, 20_000_000);
+  assert.equal(summary.availableBalanceNative, 20_000_000);
+  assert.equal(summary.manualMarketValueNative, undefined);
+  assert.equal(summary.unrealizedPnlIdr, -2_870_314);
+  const explicitZero = computeCurrencyPocketSummary('IDR', rows, 1, { ...holding, marketValue: 0 });
+  assert.equal(explicitZero.marketValueIdr, 0);
+});
+
 test('tenant cache rejects mixed owners and unverifiable legacy ownership',()=>{
   assert.equal(cacheBelongsToTenant({pockets:[],transactions:[]},'a@example.test'),false);
   assert.equal(cacheBelongsToTenant({cacheTenantEmail:'a@example.test',pockets:[],transactions:[]},'a@example.test'),true);

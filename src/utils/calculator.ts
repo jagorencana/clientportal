@@ -5,7 +5,7 @@ import {
   GlobalWealthSummary,
   LedgerTransaction,
 } from '../types/ledger';
-import { investmentPosition, isRupiahInvestment, foreignInvestmentValuation } from './investmentAccounting';
+import { investmentPosition, investmentNativeSnapshot, isRupiahInvestment, foreignInvestmentValuation } from './investmentAccounting';
 import { reportValuationKnown } from './wealthPresentation';
 import {validLedgerDate} from './ledgerIntegrity';
 
@@ -93,8 +93,9 @@ export function computeCurrencyPocketSummary(
   const manualMarketRate = Number(pocket.manualMarketRate || 0);
   const storedMarketValue = Number(pocket.marketValue);
   const hasStoredMarketValue = pocket.marketValue !== undefined && pocket.marketValue !== null && Number.isFinite(storedMarketValue) && storedMarketValue >= 0 && (storedMarketValue>0||!!pocket.lastPriceUpdatedAt);
-  const storedNativeMarketValue = Number(pocket.marketValueNative);
-  const hasStoredNativeMarketValue = pocket.marketValueNative !== undefined && pocket.marketValueNative !== null && Number.isFinite(storedNativeMarketValue) && storedNativeMarketValue >= 0 && (storedNativeMarketValue>0||!!pocket.lastPriceUpdatedAt);
+  const rawNativeMarketValue = investmentNativeSnapshot(pocket);
+  const storedNativeMarketValue = Number(rawNativeMarketValue);
+  const hasStoredNativeMarketValue = rawNativeMarketValue !== undefined && rawNativeMarketValue !== null && Number.isFinite(storedNativeMarketValue) && storedNativeMarketValue >= 0 && (storedNativeMarketValue>0||!!pocket.lastPriceUpdatedAt);
   const storedMarketCurrency = String(pocket.marketValueCurrency || code).toUpperCase();
   const effectiveSpotRate =
     supportsManualValuation && manualMarketRate > 0 && !hasStoredNativeMarketValue
