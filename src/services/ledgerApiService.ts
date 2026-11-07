@@ -180,7 +180,12 @@ export const normalizeRemotePocket = (p: any, idx: number = 0): AssetPocket => {
     return Number.isFinite(value) && (value > 0 || (value === 0 && acceptsZero)) ? value : undefined;
   };
   const marketValue = readMarketValue(p.marketValue ?? p.marketValueIdr);
-  const marketValueNative = readMarketValue(p.marketValueNative);
+  const storedNativeValue = readMarketValue(p.marketValueNative);
+  // IDR values use the same denomination in both columns. The current form
+  // saves a genuine zero in both, so a lone native zero cannot override IDR.
+  const marketValueNative = currency === 'IDR' && storedNativeValue === 0 && (marketValue ?? 0) > 0
+    ? undefined
+    : storedNativeValue;
   const marketValueCurrency = marketValueNative === undefined ? undefined : explicitValueCurrency || currency;
 
   if (instrumentType === 'LOGAM_MULIA') {

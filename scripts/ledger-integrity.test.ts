@@ -49,6 +49,9 @@ test('dated legacy crypto valuation keeps the recorded IDR value and accepts a d
   const summary = computeCurrencyPocketSummary('IDR', rows, 1, holding);
   assert.equal(summary.marketValueIdr, 20_000_000);
   assert.equal(pocketPotentialPnl(summary).amount, -2_870_314);
+  // Existing browser caches may already have inferred the IDR marker.
+  const cached = normalizeRemotePocket({ ...raw, marketValueCurrency: 'IDR' });
+  assert.equal(computeCurrencyPocketSummary('IDR', rows, 1, cached).marketValueIdr, 20_000_000);
   const empty = normalizeRemotePocket({ ...raw, marketValue: 0 });
   assert.equal(computeCurrencyPocketSummary('IDR', rows, 1, empty).marketValueIdr, 22_870_314);
   const explicit = normalizeRemotePocket({ ...raw, marketValue: 0, marketValueCurrency: 'IDR' });
