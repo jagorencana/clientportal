@@ -34,10 +34,20 @@ export function foreignInvestmentValuation(pocket:AssetPocket,rows:LedgerTransac
   return {needsRefresh:false,marketValueIdr:(value+addedNative)*fx,adjustedNative:value+addedNative,addedNative};
 }
 
+export function investmentNativeSnapshot(pocket: AssetPocket) {
+  // The legacy Sheets reader can return 0 for an empty native value. A real
+  // zero in a nominal IDR pocket is saved in both valuation columns.
+  if (isRupiahInvestment(pocket) && pocket.marketValueNative === 0 &&
+      Number.isFinite(pocket.marketValue) && Number(pocket.marketValue) > 0) {
+    return undefined;
+  }
+  return pocket.marketValueNative;
+}
+
 export function investmentPosition(pocket: AssetPocket, transactions: LedgerTransaction[]) {
   const rows = pocketTransactions(pocket, transactions);
   const cashflow = netCashflow(rows);
-  const rawValue = pocket.marketValueNative ?? pocket.marketValue;
+  const rawValue = investmentNativeSnapshot(pocket) ?? pocket.marketValue;
   const hasValuation = rawValue !== undefined && rawValue !== null &&
     String(rawValue) !== '' && Number.isFinite(Number(rawValue)) && Number(rawValue) >= 0 &&
     (Number(rawValue)>0 || !!pocket.lastPriceUpdatedAt);
