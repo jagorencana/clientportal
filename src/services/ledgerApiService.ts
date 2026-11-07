@@ -4,7 +4,7 @@
  */
 
 import { AssetPocket, InstrumentType, LedgerTransaction } from '../types/ledger';
-import {auditLedger,cacheBelongsToTenant,normalizeLedgerTransaction} from '../utils/ledgerIntegrity';
+import {auditLedger,cacheBelongsToTenant,normalizeLedgerRows} from '../utils/ledgerIntegrity';
 import type {TransferInput} from '../utils/ledgerTransfers';
 
 export async function saveRemoteTransfer(transfer:TransferInput,email:string) {
@@ -343,7 +343,7 @@ export const fetchRemoteLedgerData = async (
       data.duplicatePocketIds = Array.from(duplicatePocketIds);
 
       data.sourceTransactions=Array.isArray(data.transactions)?data.transactions:[];
-      data.transactions=data.sourceTransactions.map(normalizeLedgerTransaction);
+      data.transactions=normalizeLedgerRows(data.pockets, data.sourceTransactions);
       const integrity=auditLedger(data.pockets,data.transactions);
       data.integrityIssues=integrity.issues;
       if(data.sourcePockets.some((p:any)=>!String(p.id||p.pocketId||'').trim()))data.integrityIssues.push({priority:'P1',code:'pocket-id',message:'ID kantong kosong pada sumber data.'});

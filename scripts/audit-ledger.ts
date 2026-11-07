@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import {auditLedger,normalizeLedgerTransaction} from '../src/utils/ledgerIntegrity';
+import {auditLedger,normalizeLedgerRows} from '../src/utils/ledgerIntegrity';
 import {normalizeTransferPocket} from '../src/utils/ledgerTransfers';
 import {computeCurrencyPocketSummary,computeGlobalWealthSummary,filterValidTransactions} from '../src/utils/calculator';
 import {performanceGroups} from '../src/utils/wealthPresentation';
@@ -14,7 +14,7 @@ const raw=JSON.parse(fs.readFileSync(input,'utf8'));
 const source=raw.data&&Array.isArray(raw.data.pockets)?raw.data:raw;
 if(!Array.isArray(source.pockets)||!Array.isArray(source.transactions))throw Error('Snapshot must contain pockets and transactions arrays.');
 const pockets=source.pockets.map((p:any)=>({...normalizeTransferPocket(p),id:String(p.id||p.pocketId||'').trim()}));
-const transactions=source.transactions.map(normalizeLedgerTransaction);
+const transactions=normalizeLedgerRows(pockets, source.transactions);
 const audit=auditLedger(pockets,transactions);
 const rates=source.marketRates||source.fxRates||{};
 const valid=filterValidTransactions(transactions);

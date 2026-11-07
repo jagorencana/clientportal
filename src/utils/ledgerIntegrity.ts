@@ -32,6 +32,16 @@ export function normalizeLedgerTransaction(raw:any):LedgerTransaction {
     sourceTotalConflict,description:raw.description||raw.note||raw.notes||'Mutasi Transaksi'} as LedgerTransaction;
 }
 
+export function normalizeLedgerRows(pockets: AssetPocket[], rows: unknown[]): LedgerTransaction[] {
+  const currencyByPocket = new Map(pockets.map(pocket => [pocket.id, pocket.currencyCode]));
+  return rows.map((raw: any) => {
+    const row = raw ?? {};
+    const explicitCurrency = String(row.currency ?? '').trim() || String(row.currencyCode ?? '').trim();
+    const currency = explicitCurrency || currencyByPocket.get(String(row.pocketId ?? '').trim());
+    return normalizeLedgerTransaction({ ...row, currency });
+  });
+}
+
 export function cacheBelongsToTenant(cache:any,emailInput:string):boolean {
   const email=emailInput.trim().toLowerCase();
   if(!email||!Array.isArray(cache?.pockets)||!Array.isArray(cache?.transactions))return false;
