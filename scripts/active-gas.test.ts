@@ -184,3 +184,40 @@ test('deployed unified engine integration: redemption, retry, snapshot, tenant b
   assert.equal(afterRename.valuationCashflowIdr,beforeRename.valuationCashflowIdr,'metadata sync preserves valuation anchor');
   assert.equal(ctx.handleSyncLedgerPockets({userEmail:email,pockets:[{id:'cash-usd',name:'Changed currency',currency:'IDR',instrumentType:'CASH_VALAS'}]},ss).success,false,'cannot reinterpret existing USD history as IDR');
 });
+
+
+test('active backend saves, edits, and reloads a purchase before later asset entries', { skip: !fixture }, () => {
+  const sheets = new Map<string, Sheet>();
+  const ss = {getSheetByName: (name: string) => sheets.get(name), insertSheet: (name: string) => {
+    const sheet = new Sheet(); sheets.set(name, sheet); return sheet;
+  }};
+  const ctx = vm.createContext({
+    SpreadsheetApp: {getActiveSpreadsheet: () => ss, flush: () => {}},
+    LockService: {getScriptLock: () => ({waitLock: () => {}, releaseLock: () => {}})},
+    Utilities: {formatDate: (date: Date) => new Date(date).toLocaleDateString('en-CA', {timeZone:'Asia/Jakarta'})},
+  });
+  for (const file of ['Kode.js', 'InvestmentAccounting.js', 'TransferEngine.js', 'TransferHandlers.js']) {
+    vm.runInContext(fs.readFileSync(path.join(fixture!,file),'utf8'),ctx);
+  }
+  ctx.respondJson = (value: unknown) => value;
+  const email = 'history@example.test';
+  const account = {id:'appliances', name:'Appliance & Gadget', currency:'IDR', instrumentType:'ASET_FISIK'};
+  const sheet = ctx.ensureLedgerPocketSheet(ss);
+  sheet.cells.push(sheet.cells[0].map((header:string) => ctx.pocketSyncValue(account,header,email,0,'','2026-11-12T00:00:00Z')));
+  const save = (id:string,date:string,amount:number) => ctx.handleSaveLedgerTransaction({userEmail:email,transaction:{
+    id,pocketId:account.id,date,type:'CREDIT',currency:'IDR',nativeAmount:amount,amount,exchangeRate:1,rate:1,totalIdr:amount,costIdr:amount,
+  }},ss);
+  for (const [id,date,amount] of [['later','2026-11-12',3_000_000], ['earlier','2026-11-10',2_000_000], ['earlier','2026-11-10',2_500_000], ['earlier','2026-11-09',2_500_000]] as const) {
+    const result = save(id,date,amount);
+    assert.notEqual(result.success,false,JSON.stringify(result));
+    assert.notEqual(result.status,'error',JSON.stringify(result));
+  }
+  const loaded = ctx.handleGetLedgerData(ss,email);
+  assert.equal(loaded.transactions.length,2);
+  const earlier = loaded.transactions.find((row:any) => row.id === 'earlier');
+  assert.equal(earlier.date,'2026-11-09');
+  assert.equal(earlier.amount,2_500_000);
+  const position = ctx.investmentServerPosition({...account,currencyCode:'IDR'},loaded.transactions);
+  assert.equal(position.costBasisIdr,5_500_000);
+  assert.equal(position.marketValueIdr,5_500_000);
+});

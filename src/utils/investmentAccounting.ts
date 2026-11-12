@@ -96,6 +96,20 @@ export function investmentMutationError(pocket: AssetPocket, transactions: Ledge
   const rows = pocketTransactions(pocket, transactions);
   const existing = rows.find(t => t.id === tx.id);
   if(existing && sameFinancialValues(existing,tx))return '';
+  const credit = (row: LedgerTransaction) => row.type === 'CREDIT' || String(row.type) === 'IN';
+  if (credit(tx) && (!existing || credit(existing))) {
+    const firstChangedDate = existing && existing.date < tx.date ? existing.date : tx.date;
+    const laterRedemption = rows.some(row => row.id !== tx.id &&
+      row.costBasisReleasedIdr !== undefined && row.date >= firstChangedDate);
+    if (laterRedemption) return 'Perubahan ini memengaruhi laba/rugi pencairan setelah tanggal tersebut. Riwayat pencairan perlu dihitung ulang.';
+    const valuationDate = pocket.lastPriceUpdatedAt
+      ? new Date(pocket.lastPriceUpdatedAt).toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' }) : '';
+    if (pocket.valuationCashflowIdr !== undefined && valuationDate && firstChangedDate <= valuationDate) {
+      return 'Transaksi ini mendahului pembaruan nilai investasi. Acuan nilai investasi perlu disesuaikan.';
+    }
+    return '';
+  }
+
   if (existing && rows.some(t => t.costBasisReleasedIdr !== undefined)) {
     const dependencyError = investmentDeletionError(pocket, transactions, existing.id);
     if (dependencyError) return dependencyError;
