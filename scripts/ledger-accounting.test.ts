@@ -128,6 +128,39 @@ test('snapshot anchor includes same-day flows once and allows subsequent valuati
   near(gas.investmentServerPosition(refreshed, [...history, extra]).marketValueIdr, 12_000_000);
 });
 
+test('late-recorded purchases and credit edits are accepted in date order across nominal pocket types', () => {
+  for (const instrumentType of ['ASET_FISIK','SINKING_FUND','REKSADANA'] as const) {
+    const account = { ...pocket, instrumentType, marketValue: undefined, marketValueNative: undefined,
+      lastPriceUpdatedAt: undefined, valuationCashflowIdr: undefined };
+    const first = transaction('old', '2026-11-10', 'CREDIT', 2_000_000);
+    const latest = transaction('new', '2026-11-12', 'CREDIT', 3_000_000);
+    const added = transaction('late-entry', '2026-11-09', 'CREDIT', 1_000_000);
+    for (const [rows, candidate] of [
+      [[first, latest], added],
+      [[first, latest], { ...first, nativeAmount: 2_500_000, costIdr: 2_500_000 }],
+      [[first, latest], { ...first, date: '2026-11-08' }],
+    ] as [LedgerTransaction[], LedgerTransaction][]) {
+      assert.equal(investmentMutationError(account, rows, candidate), '');
+      assert.equal(gas.validateInvestmentTransaction(account, rows, { ...candidate }), '');
+      const updated = rows.filter(row => row.id !== candidate.id).concat(candidate);
+      const client = investmentPosition(account, updated);
+      const server = gas.investmentServerPosition(account, updated);
+      near(client.cashflow, server.cashflow);
+      near(client.costBasisIdr, server.costBasisIdr);
+      near(client.marketValueIdr, server.marketValueIdr);
+    }
+    const valued = { ...account, marketValue: 7_000_000, lastPriceUpdatedAt: '2026-11-11T01:00:00Z' };
+    const revised = [first, latest, added];
+    near(investmentPosition(valued, revised).marketValueIdr, 10_000_000);
+    const anchored = { ...valued, valuationCashflowIdr: 2_000_000 };
+    assert.match(investmentMutationError(anchored, [first,latest], added), /Acuan/);
+    assert.match(gas.validateInvestmentTransaction(anchored, [first,latest], { ...added }), /Acuan/);
+    const redeemed = { ...transaction('redeemed','2026-11-11','DEBET',500_000), costBasisReleasedIdr:500_000 };
+    assert.match(investmentMutationError(account, [first,redeemed,latest], added), /pencairan/);
+    assert.match(gas.validateInvestmentTransaction(account, [first,redeemed,latest], { ...added }), /pencairan/);
+  }
+});
+
 test('backend rejects overdraft, stale cost allocations and backdated redemptions', () => {
   const preview = redemptionPreview(pocket, history, 10_000_000);
   const tx = { ...transaction('e', '2026-10-30', 'DEBET', 10_000_000), costBasisReleasedIdr: preview.costBasisReleasedIdr };

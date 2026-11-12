@@ -446,6 +446,22 @@ function validateInvestmentTransaction(pocket, history, tx) {
     tx.costBasisReleasedIdr=existing.costBasisReleasedIdr;
     return '';
   }
+  const credit = function(row) { return row.type === 'CREDIT' || row.type === 'IN'; };
+  if (credit(tx) && (!existing || credit(existing))) {
+    const firstChangedDate = existing && String(existing.date) < String(tx.date) ? String(existing.date) : String(tx.date);
+    const laterRedemption = rows.some(function(row) {
+      return String(row.id) !== String(tx.id) && hasReleasedCost(row) && String(row.date) >= firstChangedDate;
+    });
+    if (laterRedemption) return 'Perubahan ini memengaruhi laba/rugi pencairan setelah tanggal tersebut. Riwayat pencairan perlu dihitung ulang.';
+    const valuationDate = pocket.lastPriceUpdatedAt
+      ? Utilities.formatDate(new Date(pocket.lastPriceUpdatedAt), 'Asia/Jakarta', 'yyyy-MM-dd') : '';
+    if (pocket.valuationCashflowIdr !== undefined && pocket.valuationCashflowIdr !== '' &&
+        valuationDate && firstChangedDate <= valuationDate) {
+      return 'Transaksi ini mendahului pembaruan nilai investasi. Acuan nilai investasi perlu disesuaikan.';
+    }
+    delete tx.costBasisReleasedIdr;
+    return '';
+  }
   if (existing && rows.some(hasReleasedCost)) {
     // A lost response may trigger an identical retry. Accept it without treating it as an edit.
     const unchanged = ['date', 'currency', 'type', 'description', 'location', 'poscategory', 'nativeamount', 'exchangerate', 'costbasisreleasedidr'].every(function(key) {
