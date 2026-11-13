@@ -161,6 +161,33 @@ test('late-recorded purchases and credit edits are accepted in date order across
   }
 });
 
+test('late budget withdrawal uses the balance on its date and preserves later nominal redemptions', () => {
+  const account = { ...pocket, marketValue:undefined,marketValueNative:undefined,lastPriceUpdatedAt:undefined };
+  const opening = transaction('opening','2026-11-01','CREDIT',5_000_000);
+  const later = {...transaction('later','2026-11-12','DEBET',1_000_000),costBasisReleasedIdr:1_000_000};
+  const rows = [opening,later];
+  const candidate = {...transaction('late-expense','2026-11-11','DEBET',484_802),costBasisReleasedIdr:484_802};
+  const preview = redemptionPreview(account, rows, candidate.nativeAmount, candidate.date);
+  near(preview.marketValueIdr,5_000_000);
+  near(preview.costBasisReleasedIdr,484_802);
+  assert.equal(investmentMutationError(account,rows,candidate),'');
+  assert.equal(gas.validateInvestmentTransaction(account,rows,{...candidate}),'');
+  const after = investmentPosition(account,rows.concat(candidate));
+  near(after.marketValueIdr,3_515_198);
+  near(after.costBasisIdr,3_515_198);
+  near(after.realizedPnlIdr,0);
+  const futureCredit = transaction('future','2026-11-13','CREDIT',10_000_000);
+  assert.match(investmentMutationError(account,rows.concat(futureCredit),{...candidate,nativeAmount:6_000_000,costIdr:-6_000_000}),/Saldo tidak cukup/);
+  assert.match(gas.validateInvestmentTransaction(account,rows.concat(futureCredit),{...candidate,nativeAmount:6_000_000}),/Saldo tidak cukup/);
+  const earlier = {...candidate,date:'2026-10-31'};
+  assert.match(investmentMutationError(account,rows,earlier),/Saldo tidak cukup/);
+  assert.match(gas.validateInvestmentTransaction(account,rows,{...earlier}),/Saldo tidak cukup/);
+  assert.match(gas.validateInvestmentTransaction(account,rows,{...candidate,costBasisReleasedIdr:1}),/Modal/);
+  const changed = {...candidate,nativeAmount:500_000,costIdr:-500_000,costBasisReleasedIdr:500_000};
+  assert.equal(investmentMutationError(account,rows.concat(candidate),changed),'');
+  assert.equal(gas.validateInvestmentTransaction(account,rows.concat(candidate),{...changed}),'');
+});
+
 test('backend rejects overdraft, stale cost allocations and backdated redemptions', () => {
   const preview = redemptionPreview(pocket, history, 10_000_000);
   const tx = { ...transaction('e', '2026-10-30', 'DEBET', 10_000_000), costBasisReleasedIdr: preview.costBasisReleasedIdr };

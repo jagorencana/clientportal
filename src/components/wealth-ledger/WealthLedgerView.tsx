@@ -668,7 +668,7 @@ export const WealthLedgerView: React.FC<WealthLedgerProps> = ({
       const mutationError = investmentMutationError(pocket, history, tx);
       if (mutationError) throw new Error(mutationError);
       if (tx.type === 'DEBET') {
-        const preview = redemptionPreview(pocket, history.filter(t => t.id !== tx.id), tx.nativeAmount);
+        const preview = redemptionPreview(pocket, history.filter(t => t.id !== tx.id), tx.nativeAmount, tx.date);
         if (!investmentAccountingReady || preview.ambiguousLegacySnapshot) {
           throw new Error('Perbarui layanan pencatatan dan nilai investasi sebelum mencairkan dana.');
         }

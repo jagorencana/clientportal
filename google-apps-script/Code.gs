@@ -398,7 +398,7 @@ function investmentServerPosition(pocket, transactions) {
       balance = Math.max(0, balance - value);
     }
   });
-  return { cashflow: cashflow, marketValueIdr: hasValuation ? Number(rawValue) + cashflow - baseline : cashflow, costBasisIdr: cost, ambiguousLegacySnapshot: ambiguous };
+  return { hasValuation: hasValuation, cashflow: cashflow, marketValueIdr: hasValuation ? Number(rawValue) + cashflow - baseline : cashflow, costBasisIdr: cost, ambiguousLegacySnapshot: ambiguous };
 }
 
 function sameServerFinancialValues(a,b) {
@@ -447,6 +447,27 @@ function validateInvestmentTransaction(pocket, history, tx) {
     return '';
   }
   const credit = function(row) { return row.type === 'CREDIT' || row.type === 'IN'; };
+  const nominalHistory = !investmentServerPosition(pocket, rows).hasValuation && rows.every(function(row) {
+    const native = Number(row.nativeAmount !== undefined ? row.nativeAmount : row.amount);
+    const cost = credit(row) ? Math.abs(Number(row.costIdr !== undefined ? row.costIdr : row.totalIdr)) :
+      hasReleasedCost(row) ? Number(row.costBasisReleasedIdr) : native;
+    return isFinite(cost) && Math.abs(cost - native) < 0.000001;
+  });
+  if (!credit(tx) && nominalHistory) {
+    const projected = rows.filter(function(row) { return String(row.id) !== String(tx.id); }).concat([tx]);
+    const dates = Array.from(new Set(projected.map(function(row) { return String(row.date); }))).sort();
+    for (let i = 0; i < dates.length; i++) {
+      const balance = projected.filter(function(row) { return String(row.date) <= dates[i]; })
+        .reduce(function(sum, row) { return sum + (credit(row) ? 1 : -1) * Number(row.nativeAmount !== undefined ? row.nativeAmount : row.amount); }, 0);
+      if (balance < -0.000001) return 'Saldo tidak cukup pada ' + dates[i] + '. Periksa transaksi pada tanggal tersebut.';
+    }
+    if (!hasReleasedCost(tx) || Math.abs(Number(tx.costBasisReleasedIdr) - amount) > 0.01) {
+      return 'Modal pencairan berubah. Muat ulang sebelum menyimpan.';
+    }
+    tx.costBasisReleasedIdr = amount;
+    return '';
+  }
+
   if (credit(tx) && (!existing || credit(existing))) {
     const firstChangedDate = existing && String(existing.date) < String(tx.date) ? String(existing.date) : String(tx.date);
     const laterRedemption = rows.some(function(row) {

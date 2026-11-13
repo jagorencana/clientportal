@@ -221,3 +221,46 @@ test('active backend saves, edits, and reloads a purchase before later asset ent
   assert.equal(position.costBasisIdr,5_500_000);
   assert.equal(position.marketValueIdr,5_500_000);
 });
+
+test('active backend persists historical budget withdrawals, retries and edits without borrowing future funds', {skip:!fixture}, () => {
+  const sheets = new Map<string, Sheet>();
+  const ss = {getSheetByName:(name:string)=>sheets.get(name),insertSheet:(name:string)=>{
+    const sheet = new Sheet();sheets.set(name,sheet);return sheet;
+  }};
+  const ctx = vm.createContext({
+    SpreadsheetApp:{getActiveSpreadsheet:()=>ss,flush:()=>{}},
+    LockService:{getScriptLock:()=>({waitLock:()=>{},releaseLock:()=>{}})},
+    Utilities:{formatDate:(date:Date)=>new Date(date).toLocaleDateString('en-CA',{timeZone:'Asia/Jakarta'})},
+  });
+  for(const file of ['Kode.js','InvestmentAccounting.js','TransferEngine.js','TransferHandlers.js']) {
+    vm.runInContext(fs.readFileSync(path.join(fixture!,file),'utf8'),ctx);
+  }
+  ctx.respondJson=(value:unknown)=>value;
+  const email='history@example.test';
+  const account={id:'shopping',name:'Shopping Budget',currency:'IDR',instrumentType:'SINKING_FUND'};
+  const ps=ctx.ensureLedgerPocketSheet(ss);
+  ps.cells.push(ps.cells[0].map((header:string)=>ctx.pocketSyncValue(account,header,email,0,'','2026-11-13T00:00:00Z')));
+  const save=(id:string,date:string,type:string,amount:number)=>ctx.handleSaveLedgerTransaction({
+    userEmail:email,transaction:{id,pocketId:'shopping',date,type,currency:'IDR',amount,nativeAmount:amount,
+      rate:1,exchangeRate:1,totalIdr:type==='CREDIT'?amount:-amount,
+      costBasisReleasedIdr:type==='CREDIT'?undefined:amount},
+  },ss);
+  for(const args of [
+    ['opening','2026-11-01','CREDIT',5_000_000],
+    ['later','2026-11-12','DEBET',1_000_000],
+    ['expense','2026-11-11','DEBET',484_802],
+    ['expense','2026-11-11','DEBET',484_802],
+    ['expense','2026-11-11','DEBET',500_000],
+  ] as const){
+    const result=save(args[0],args[1],args[2],args[3]);
+    assert.notEqual(result.success,false,JSON.stringify(result));
+    assert.notEqual(result.status,'error',JSON.stringify(result));
+  }
+  const rejected=save('too-early','2026-10-31','DEBET',100);
+  assert.equal(rejected.success,false);
+  const loaded=ctx.handleGetLedgerData(ss,email);
+  assert.equal(loaded.transactions.length,3);
+  const position=ctx.investmentServerPosition({...account,currencyCode:'IDR'},loaded.transactions);
+  assert.equal(position.marketValueIdr,3_500_000);
+  assert.equal(position.costBasisIdr,3_500_000);
+});

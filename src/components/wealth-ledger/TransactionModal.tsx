@@ -156,7 +156,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   const currentAvailableBalance = useMemo(() => {
     if (!activePocket) return 0;
     if (isInvestment) {
-      return redemptionPreview(activePocket, transactions.filter(t => t.id !== editTransaction?.id), 0).marketValueIdr;
+      return redemptionPreview(activePocket, transactions.filter(t => t.id !== editTransaction?.id), 0, date).marketValueIdr;
     }
     return transactions
       .filter(
@@ -169,7 +169,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         (acc, t) => (t.type === 'CREDIT' ? acc + t.nativeAmount : acc - t.nativeAmount),
         0
       );
-  }, [transactions, activePocket, editTransaction]);
+  }, [transactions, activePocket, editTransaction, date]);
 
   // Auto-calculated preview IDR
   const cleanAmount = typeof nativeAmountStr === 'string'
@@ -186,7 +186,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     pocketId:activePocket?.id,date,type,nativeAmount:cleanAmount,exchangeRate:cleanRate,costIdr:editTransaction.costIdr,
   });
   const redemption = isInvestment && type === 'DEBET' && !metadataOnly
-    ? redemptionPreview(activePocket, transactions.filter(t => t.id !== editTransaction?.id), cleanAmount) : null;
+    ? redemptionPreview(activePocket, transactions.filter(t => t.id !== editTransaction?.id), cleanAmount, date) : null;
   const mutationError = isInvestment && !metadataOnly && date ? investmentMutationError(activePocket,transactions,{
     ...editTransaction,id:editTransaction?.id||`tx-${Date.now()}`,date,type,nativeAmount:cleanAmount,exchangeRate:cleanRate,costIdr:previewCostIdr,
   } as LedgerTransaction) : '';
