@@ -252,7 +252,7 @@ test('active backend persists historical budget withdrawals, retries and edits w
     ['expense','2026-11-11','DEBET',484_802],
     ['expense','2026-11-11','DEBET',500_000],
   ] as const){
-    const result=save(...args);
+    const result=save(args[0],args[1],args[2],args[3]);
     assert.notEqual(result.success,false,JSON.stringify(result));
     assert.notEqual(result.status,'error',JSON.stringify(result));
   }
