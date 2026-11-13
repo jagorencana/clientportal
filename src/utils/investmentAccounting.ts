@@ -85,8 +85,9 @@ export function investmentPosition(pocket: AssetPocket, transactions: LedgerTran
   return { cashflow, marketValueIdr, costBasisIdr, realizedPnlIdr, hasValuation, ambiguousLegacySnapshot };
 }
 
-export function redemptionPreview(pocket: AssetPocket, transactions: LedgerTransaction[], amount: number) {
-  const position = investmentPosition(pocket, transactions);
+export function redemptionPreview(pocket: AssetPocket, transactions: LedgerTransaction[], amount: number, date?: string) {
+  const history = date ? transactions.filter(row => row.date <= date) : transactions;
+  const position = investmentPosition(pocket, history);
   const released = position.marketValueIdr > 0
     ? position.costBasisIdr * Math.min(1, amount / position.marketValueIdr) : 0;
   return { ...position, costBasisReleasedIdr: released, realizedPnlIdr: amount - released };
@@ -97,6 +98,23 @@ export function investmentMutationError(pocket: AssetPocket, transactions: Ledge
   const existing = rows.find(t => t.id === tx.id);
   if(existing && sameFinancialValues(existing,tx))return '';
   const credit = (row: LedgerTransaction) => row.type === 'CREDIT' || String(row.type) === 'IN';
+  const nominalHistory = !investmentPosition(pocket, rows).hasValuation && rows.every(row => {
+    const amount = Number(row.nativeAmount ?? row.amount);
+    const cost = credit(row) ? Math.abs(Number(row.costIdr ?? row.totalIdr)) :
+      row.costBasisReleasedIdr === undefined ? amount : Number(row.costBasisReleasedIdr);
+    return Number.isFinite(cost) && Math.abs(cost - amount) < 0.000001;
+  });
+  if (!credit(tx) && nominalHistory) {
+    const projected = rows.filter(row => row.id !== tx.id).concat(tx);
+    const dates = [...new Set(projected.map(row => row.date))].sort();
+    for (const date of dates) {
+      if (netCashflow(projected.filter(row => row.date <= date)) < -0.000001) {
+        return 'Saldo tidak cukup pada ' + date + '. Periksa transaksi pada tanggal tersebut.';
+      }
+    }
+    return '';
+  }
+
   if (credit(tx) && (!existing || credit(existing))) {
     const firstChangedDate = existing && existing.date < tx.date ? existing.date : tx.date;
     const laterRedemption = rows.some(row => row.id !== tx.id &&
